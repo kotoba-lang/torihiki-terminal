@@ -1,0 +1,15 @@
+;; This repository's entry in the kotoba.repository-role-rules taxonomy.
+;; Authority for the vocabulary is the superproject's
+;; manifest/repository-rules.edn (ADR-2607299000).
+{:schema "kotoba.repository-role-rules.v0"
+ :this-repo
+ {:name "torihiki-terminal"
+  ;; Role suffix rather than a prefix: the short name `torihiki` is taken by
+  ;; the engine, and CLAUDE.md's naming rule says to add a role
+  ;; (cf. kami-engine-guest) rather than a language or a generic word.
+  :prefix nil
+  :role :application
+  :execution :none
+  :must [:build-from-the-real-engine :state-what-is-recorded-vs-live]
+  :must-not [:mock-market-data :reimplement-engine-logic :require-liquid-glass-directly]
+  :depends-on ["kotoba-lang/torihiki" "kotoba-lang/kotoba-ui"]}}
