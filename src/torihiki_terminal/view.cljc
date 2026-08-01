@@ -159,6 +159,11 @@
      [:span "Funding (1h)"] [:span {:id "tk-funding" :class "tk-px"} (rate-pct (:funding frame))]]
     [:div {:class "tk-kv hig-footnote"}
      [:span "Oracle"] [:span {:id "tk-oracle" :class "tk-px"} (str "$" (usd (:oracle frame)))]]
+    [:p {:class "hig-caption2 tk-dim"}
+     "Margin and liquidation read the MARK, never the last print. The mark is "
+     "the oracle plus a banded, size-weighted book premium — one lot lifted "
+     "through a thin book cannot move it, which is otherwise a way to "
+     "liquidate other people."]
     [:p {:class "hig-caption2 tk-dim tk-root"}
      "state root " [:code {:id "tk-root"} (subs (:root frame) 0 32)]]
     [:p {:class "hig-caption2 tk-dim"}
@@ -176,6 +181,9 @@
    [:div {:class "tk-stat"}
     [:span {:class "hig-caption2 tk-dim"} "Last"]
     [:span {:id "tk-last" :class "hig-title3 tk-px"} (str "$" (usd (:last frame)))]]
+   [:div {:class "tk-stat"}
+    [:span {:class "hig-caption2 tk-dim"} "Mark"]
+    [:span {:class "hig-body tk-px" :id "tk-mark"} (str "$" (usd (:mark frame)))]]
    [:div {:class "tk-stat"}
     [:span {:class "hig-caption2 tk-dim"} "Oracle"]
     [:span {:class "hig-body tk-px" :id "tk-oracle2"} (str "$" (usd (:oracle frame)))]]

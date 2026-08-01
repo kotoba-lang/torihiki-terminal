@@ -47,6 +47,7 @@
     rows(document.getElementById("tk-asks"), f.a.slice().reverse(), "ask", maxCum);
     rows(document.getElementById("tk-bids"), f.b, "bid", maxCum);
     set("tk-last", "$" + usd(f.l));
+    set("tk-mark", "$" + usd(f.m));
     set("tk-oracle", "$" + usd(f.o));
     set("tk-oracle2", "$" + usd(f.o));
     set("tk-equity", "$" + usd(Math.floor(f.e / tick)));

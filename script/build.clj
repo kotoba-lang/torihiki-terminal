@@ -18,7 +18,7 @@
   "Only the fields the replay script touches. Sending the whole frame would
   put a few hundred kilobytes of book depth on the wire for no reason."
   [f]
-  {:h (:height f) :l (:last f) :o (:oracle f) :e (:equity f)
+  {:h (:height f) :l (:last f) :m (:mark f) :o (:oracle f) :e (:equity f)
    :fd (:funding f) :r (:resting f) :rt (subs (:root f) 0 32)
    :b (mapv (juxt :level :qty :cum) (:bids f))
    :a (mapv (juxt :level :qty :cum) (:asks f))

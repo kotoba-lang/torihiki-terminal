@@ -62,7 +62,10 @@
         oracle (get-in ex [:oracle 1] mark)]
     {:height (:height ex)
      :ts (:ts ex)
-     :last mark
+     ;; `:last` is the print, `:mark` is what margin is measured against. They
+     ;; are shown separately because they ARE separate — see torihiki.mark.
+     :last (get-in ex [:last 1] mark)
+     :mark mark
      :oracle oracle
      :bids (depth book bk/bid 11)
      :asks (depth book bk/ask 11)
