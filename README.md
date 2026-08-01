@@ -6,6 +6,47 @@ The trading terminal for [`torihiki`](https://github.com/kotoba-lang/torihiki).
 [`torihiki-node`](https://github.com/kotoba-lang/torihiki-node) as it produces
 blocks.
 
+## The page was a picture of itself
+
+For the whole life of the "live client", this build emitted **no script tag**.
+`client.cljs` was written, compiled to `public/js/app.js`, uploaded on every
+deploy, and never referenced from the document.
+
+So the deployed page held the zero frame the build rendered, and the status
+line read `connecting to the node…` forever — which is indistinguishable from
+a terminal whose node is slow to answer. Nothing looked wrong.
+
+Everything else was green the entire time. The build succeeded. The bundle
+existed and shipped. The HTML was valid. The design audit scored **100.00** on
+a page that did nothing. The engine passed 140 tests. The previous commit here
+described a client that polls and re-renders, and that client had never
+executed in production.
+
+It was found by opening the site in a real browser, which is the only place
+the difference is visible.
+
+Two things changed so it cannot happen quietly again:
+
+- **`script/build.clj` refuses to write a document that does not reference the
+  bundle**, or when the bundle has not been compiled. That would have caught
+  this exact bug.
+- **`script/verify.cljs` clicks the deployed page** — waits for the session
+  panel to fill, clicks the faucet, types a price and size, toggles a chip,
+  clicks Buy, and asserts the chain moved. It exits non-zero when it does not,
+  because a verification that always passes is the same kind of object as a
+  page that always renders.
+
+  ```
+  NODE_PATH=<root>/node_modules nbb script/verify.cljs
+  TK_BASE=http://127.0.0.1:8899 nbb script/verify.cljs
+  ```
+
+  Against production: `live · block 35`, faucet accepted at 36, chip toggled,
+  buy accepted at 37, nonce 1 → 3.
+
+An assertion about the HTML still cannot tell you the page works. Only
+clicking it can, so both exist.
+
 ## What is real here
 
 The book, the fills, the funding rate and the state roots are read from a live

@@ -355,5 +355,16 @@
               :description
               "An open reimplementation of Hyperliquid's closed HyperCore: order book, clearinghouse, funding and liquidation as one deterministic state machine."
               :theme theme
-              :head [[:style app-css]]}
+              ;; The bundle. Without this the page is a picture of a
+              ;; terminal: every panel keeps the zero frame the build rendered
+              ;; and the status line reads "connecting to the node…" forever,
+              ;; which is exactly what a page loading slowly looks like.
+              ;;
+              ;; It was missing for the whole life of the "live client" — the
+              ;; client was written, compiled, deployed to /js/app.js, and
+              ;; never referenced from the document. Nothing catches that: the
+              ;; build succeeds, the bundle exists, the HTML validates, and the
+              ;; design audit scores a page that does nothing.
+              :head [[:style app-css]
+                     [:script {:type "module" :src "/js/app.js" :defer true}]]}
              (view session)))
