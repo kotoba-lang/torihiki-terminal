@@ -2,6 +2,13 @@
  :deps {org.clojure/clojure {:mvn/version "1.12.0"}
         org.clojure/clojurescript {:mvn/version "1.11.132"}
         thheller/shadow-cljs {:mvn/version "2.28.20"}
+        ;; The engine, for torihiki.auth/signing-payload only. The browser must
+        ;; produce the byte-identical string the node hashes, and the way to
+        ;; guarantee that is to call the same function rather than to write a
+        ;; second one in JavaScript and keep them in agreement by hand.
+        io.github.kotoba-lang/torihiki
+        {:git/url "https://github.com/kotoba-lang/torihiki.git"
+         :git/sha "e686ff4e8081a6d1b298e84e6947c2e3fe5d33ee"}
         io.github.kotoba-lang/kotoba-ui
         {:git/url "https://github.com/kotoba-lang/kotoba-ui.git"
          :git/sha "80445c9dbafef5402d1aee8409fb6fcfa35cef4d"}}

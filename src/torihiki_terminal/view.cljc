@@ -52,6 +52,13 @@
     (str (when neg? "-") (quot a cfg/lots-per-unit) "."
          (pad-left (str (rem a cfg/lots-per-unit)) 3 "0"))))
 
+(defn dollars
+  "Collateral and equity are in cents; `usd` takes ticks. Converting at the
+  call site is how the two got mixed up once already — the panel showed a
+  balance ten times too large and looked entirely plausible."
+  [cents]
+  (usd (quot cents cfg/tick-usd-cents)))
+
 (defn signed-usd [cents]
   (str (if (neg? cents) "-" "+") "$" (usd (Math/abs (long (quot cents cfg/tick-usd-cents))))))
 
@@ -117,19 +124,58 @@
      (ui/stack {:direction :horizontal :gap :2}
                (ui/button "Buy / Long" {:act :buy :class "tk-buy"})
                (ui/button "Sell / Short" {:act :sell :class "tk-sell"}))
-     (ui/text-field {:placeholder "Limit price" :aria-label "Limit price"})
-     (ui/text-field {:placeholder "Size (BTC)" :aria-label "Size"})
+     (ui/text-field {:id "tk-price" :placeholder "Limit price (ticks)"
+                     :aria-label "Limit price" :inputmode "numeric"})
+     (ui/text-field {:id "tk-size" :placeholder "Size (lots)"
+                     :aria-label "Size" :inputmode "numeric"})
      (ui/stack {:direction :horizontal :gap :2}
-               (ui/chip "Post only") (ui/chip "IOC") (ui/chip "Reduce only"))
+               ;; chip carries no :id, so these are found by their act —
+               ;; adding an :id it drops would look wired and would not be
+               (ui/chip "Post only" {:act :flag-post})
+               (ui/chip "IOC" {:act :flag-ioc})
+               (ui/chip "Reduce only" {:act :flag-ro}))
+     ;; Says what happened to the last transaction, including why it was
+     ;; refused. A form that silently does nothing on a rejection teaches the
+     ;; trader that the button is broken, which is the wrong lesson when the
+     ;; chain gave a reason.
+     [:p {:id "tk-order-status" :class "hig-footnote tk-dim"}
+      "No order submitted yet."]
      (ui/divider)
      [:div {:class "tk-kv hig-footnote"}
       [:span "Max leverage"] [:span (str cfg/max-leverage "x")]]
      [:div {:class "tk-kv hig-footnote"}
       [:span "Taker / maker fee"] [:span "3.5 bp / 1.0 bp"]]
      [:div {:class "tk-kv hig-footnote"}
-      [:span "Maintenance margin"] [:span "1.25%"]]
-     (ui/button "Connect wallet" {:act :connect :class "tk-connect"}))]
+      [:span "Maintenance margin"] [:span "1.25%"]])]
    {:class "tk-entry"}))
+
+(defn session-panel
+  "The account this browser trades as, and where its collateral came from.
+
+  There is no wallet to connect. The key is generated here and stays here, and
+  the collateral is minted by asking — on a devnet with no bridge, that is
+  what a deposit is. Both facts are on the panel rather than in a document,
+  because the panel is what somebody about to trade actually reads."
+  []
+  (ui/panel
+   [[:div {:class "tk-panel-head"} [:span {:class "hig-headline"} "Session"]]
+    (ui/stack
+     {:gap :2}
+     [:div {:class "tk-kv hig-footnote"}
+      [:span "Account"] [:span {:id "tk-account" :class "tk-px"} "—"]]
+     [:div {:class "tk-kv hig-footnote"}
+      [:span "Collateral"] [:span {:id "tk-collateral" :class "tk-px"} "—"]]
+     [:div {:class "tk-kv hig-footnote"}
+      [:span "Free"] [:span {:id "tk-free" :class "tk-px"} "—"]]
+     [:div {:class "tk-kv hig-footnote"}
+      [:span "Next nonce"] [:span {:id "tk-nonce" :class "tk-px"} "—"]]
+     (ui/button "Mint 100,000 test USD" {:act :faucet :class "tk-faucet"})
+     [:p {:id "tk-session-note" :class "hig-caption2 tk-dim"}
+      "Session key generated in this browser and kept in local storage. Not a
+       wallet: it holds nothing outside this devnet, and clearing site data
+       destroys it. Collateral here is minted on request — there is no bridge,
+       so every balance on this chain was asked for rather than deposited."])]
+   {:class "tk-session"}))
 
 (defn positions-panel [frame]
   (let [{:keys [size entry upnl]} (:position frame)]
@@ -207,7 +253,9 @@
      {:nav (ui/nav-bar "torihiki"
                        {:trailing [(ui/chip "recorded session")
                                    (ui/button "GitHub" {:act :gh})]})
-      :sidebar [(order-entry)]
+      :sidebar [(session-panel)
+                (order-entry)
+                [:div {:id "tk-positions-panel"} (positions-panel f)]]
       :id "tk-root"
       :attrs {:data-node cfg/node-url}}
      [:div {:class "tk-live"}
@@ -287,6 +335,7 @@
 .tk-col-head,.tk-row{display:grid;grid-template-columns:1fr 1fr 1fr;
   gap:var(--hig-spacing-2);padding:2px var(--hig-spacing-2)}
 .tk-postable .tk-col-head,.tk-postable .tk-row{grid-template-columns:1fr 1fr 1fr 1fr}
+.tk-chip-on{outline:2px solid var(--hig-color-accent);outline-offset:-2px}
 .tk-row{position:relative;border-radius:var(--hig-radius-1)}
 .tk-row>span{position:relative;z-index:1;text-align:right;min-width:0}
 .tk-row>span:first-of-type{text-align:left}
