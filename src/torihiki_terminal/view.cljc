@@ -16,7 +16,7 @@
   where a sibling path belongs. Filed rather than worked around silently."
   (:require [clojure.string :as str]
             [kotoba-ui.core :as ui]
-            [torihiki-terminal.session :as sess]))
+            [torihiki-terminal.config :as cfg]))
 
 (def theme
   "The only place a hex color is legitimate in app code (agent-guide rule 5)."
@@ -33,7 +33,7 @@
 (defn usd
   "Price ticks → dollars. One tick is ten cents."
   [ticks]
-  (let [cents (* ticks sess/tick-usd-cents)
+  (let [cents (* ticks cfg/tick-usd-cents)
         d (quot cents 100)
         c (rem cents 100)
         s (str d)
@@ -49,11 +49,11 @@
   [lots]
   (let [neg? (neg? lots)
         a (if neg? (- lots) lots)]
-    (str (when neg? "-") (quot a sess/lots-per-unit) "."
-         (pad-left (str (rem a sess/lots-per-unit)) 3 "0"))))
+    (str (when neg? "-") (quot a cfg/lots-per-unit) "."
+         (pad-left (str (rem a cfg/lots-per-unit)) 3 "0"))))
 
 (defn signed-usd [cents]
-  (str (if (neg? cents) "-" "+") "$" (usd (Math/abs (long (quot cents sess/tick-usd-cents))))))
+  (str (if (neg? cents) "-" "+") "$" (usd (Math/abs (long (quot cents cfg/tick-usd-cents))))))
 
 (defn rate-pct
   "A rate in torihiki.fixed's 1e9 scale → percent with four decimals."
@@ -72,7 +72,11 @@
    [:span {:class "tk-sz"} (coins qty)]
    [:span {:class "tk-cum"} (coins cum)]])
 
-(defn order-book [frame]
+(defn order-book
+  "Panel body. The client re-renders this exact function and swaps the result
+  into `#tk-book-panel`, so the server and the browser never disagree about
+  what a row looks like."
+  [frame]
   (let [{:keys [bids asks]} frame
         max-cum (max 1 (apply max 1 (map :cum (concat bids asks))))]
     (ui/panel
@@ -119,7 +123,7 @@
                (ui/chip "Post only") (ui/chip "IOC") (ui/chip "Reduce only"))
      (ui/divider)
      [:div {:class "tk-kv hig-footnote"}
-      [:span "Max leverage"] [:span (str (:max-leverage sess/market) "x")]]
+      [:span "Max leverage"] [:span (str cfg/max-leverage "x")]]
      [:div {:class "tk-kv hig-footnote"}
       [:span "Taker / maker fee"] [:span "3.5 bp / 1.0 bp"]]
      [:div {:class "tk-kv hig-footnote"}
@@ -173,8 +177,11 @@
 
 ;; ── the page ────────────────────────────────────────────────────────────────
 
-(defn ticker [frame]
-  [:div {:class "tk-ticker"}
+(defn ticker-body
+  "The ticker's contents, without its container — the client swaps this into
+  `#tk-ticker` rather than replacing the container it is mounted in."
+  [frame]
+  (list
    [:div {:class "tk-mkt"}
     [:span {:class "hig-headline"} "BTC-PERP"]
     [:span {:class "hig-caption2 tk-dim"} "torihiki"]]
@@ -188,11 +195,11 @@
     [:span {:class "hig-caption2 tk-dim"} "Oracle"]
     [:span {:class "hig-body tk-px" :id "tk-oracle2"} (str "$" (usd (:oracle frame)))]]
    [:div {:class "tk-stat"}
-    [:span {:class "hig-caption2 tk-dim"} "Equity"]
-    [:span {:id "tk-equity" :class "hig-body tk-px"} (str "$" (usd (quot (:equity frame) sess/tick-usd-cents)))]]
-   [:div {:class "tk-stat"}
     [:span {:class "hig-caption2 tk-dim"} "Block"]
-    [:span {:id "tk-height2" :class "hig-body tk-px"} (:height frame)]]])
+    [:span {:id "tk-height2" :class "hig-body tk-px"} (:height frame)]]))
+
+(defn ticker [frame]
+  [:div {:id "tk-ticker" :class "tk-ticker"} (ticker-body frame)])
 
 (defn view [{:keys [frames meta]}]
   (let [f (first frames)]
@@ -200,43 +207,59 @@
      {:nav (ui/nav-bar "torihiki"
                        {:trailing [(ui/chip "recorded session")
                                    (ui/button "GitHub" {:act :gh})]})
-      :sidebar [(order-entry)]}
+      :sidebar [(order-entry)]
+      :id "tk-root"
+      :attrs {:data-node cfg/node-url}}
+     [:div {:class "tk-live"}
+      [:span {:id "tk-status" :class "hig-caption2 tk-dim"} "connecting to the node…"]]
      (ticker f)
      [:div {:class "tk-grid"}
-      (order-book f)
+      [:div {:id "tk-book-panel"} (order-book f)]
       (ui/stack {:gap :3}
-                (trades-panel f)
-                (positions-panel f)
-                (chain-panel f meta))]
+                [:div {:id "tk-trades-panel"} (trades-panel f)]
+                [:div {:id "tk-chain-panel"} (chain-panel f meta)])]
      (ui/section
       {:title "What you are looking at" :wide true}
       [:p {:class "hig-body"}
-       "Every number on this page was produced by "
+       "Every number on this page comes from "
        [:a {:href "https://github.com/kotoba-lang/torihiki"} "torihiki"]
        ", an open reimplementation of the exchange state machine that "
-       "Hyperliquid keeps closed. The order book, the fills, the position and "
-       "its unrealized PnL, the funding rate and the state roots all came out "
-       "of the real engine: prices are integer ticks, matching is price-time "
+       "Hyperliquid keeps closed, running live in a "
+       [:a {:href "https://github.com/kotoba-lang/torihiki-node"} "Cloudflare Worker"]
+       ". The book, the fills and the state roots are read from that node as "
+       "it produces them: prices are integer ticks, matching is price-time "
        "priority, and the roots are SHA-256 over a canonical encoding."]
       [:p {:class "hig-body"}
-       [:strong "It is a recording, not a live venue."]
-       " The engine ran " (:blocks meta) " blocks ahead of time and this page "
-       "replays the frames. The engine does run in a browser — the same "
-       "ClojureScript sources reproduce a JVM validator's state root byte for "
-       "byte — but executing it in your tab is a separate build that has not "
-       "been done. Saying which one you are looking at seemed better than "
-       "letting the animation imply the other."]
+       [:strong "It is a sequencer, not a chain."]
+       " One writer decides the order of transactions; nothing votes and "
+       "nothing tolerates a Byzantine peer. The node says so in its own "
+       [:code "/head"] " response. What the sequencer cannot do is lie "
+       "undetectably — every block it produces can be replayed against the "
+       "same engine and its state root contradicted."]
+      [:p {:class "hig-body"}
+       "This page renders with the same pure functions that render it on the "
+       "server, so the browser and the node never disagree about what a row "
+       "looks like. When the node is unreachable it says so above rather than "
+       "freezing on the last good frame — a terminal that silently shows "
+       "stale prices invites a trade."]
       (ui/grid
        {:min "230px"}
        (ui/panel [[:h3 {:class "hig-headline"} "3,155,313 ops/sec"]
                   [:p {:class "hig-footnote tk-dim"}
                    "Measured matching throughput, 317 ns/op — 15.8x HyperCore's "
-                   "documented 200,000 orders/sec. Execution only; no consensus."]])
+                   "documented 200,000 orders/sec. Execution only; the live "
+                   "node is nowhere near that, and nothing here claims it is."]])
        (ui/panel [[:h3 {:class "hig-headline"} "Sequencer, not consensus"]
                   [:p {:class "hig-footnote tk-dim"}
                    "One writer decides the order. Nothing votes. The log is "
                    "checkable by replay, which is a different guarantee from "
                    "tamper-evidence and the stronger one."]])
+       (ui/panel [[:h3 {:class "hig-headline"} "Signed, replay-proof"]
+                  [:p {:class "hig-footnote tk-dim"}
+                   "Every transaction carries an Ed25519 signature over the "
+                   "chain id, the account, a strictly sequential nonce and "
+                   "every field. Reusing a nonce is refused; signing someone "
+                   "else's account is refused."]])
        (ui/panel [[:h3 {:class "hig-headline"} "No floating point"]
                   [:p {:class "hig-footnote tk-dim"}
                    "Every value is an integer inside the range both the JVM and "
@@ -252,6 +275,7 @@
 .tk-dim{color:var(--hig-label-secondary)}
 .tk-up{color:var(--hig-palette-green)}
 .tk-down{color:var(--hig-palette-red)}
+.tk-live{padding-top:var(--hig-spacing-2)}
 .tk-ticker{display:flex;flex-wrap:wrap;gap:var(--hig-spacing-6);align-items:baseline;
   padding:var(--hig-spacing-4) 0}
 .tk-stat,.tk-mkt{display:flex;flex-direction:column;gap:var(--hig-spacing-1);min-width:0}

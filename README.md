@@ -1,51 +1,62 @@
 # torihiki-terminal
 
-The trading terminal for [`torihiki`](https://github.com/kotoba-lang/torihiki) —
-an open reimplementation of the exchange state machine Hyperliquid keeps closed.
+The trading terminal for [`torihiki`](https://github.com/kotoba-lang/torihiki).
 
-**Live:** *(see the deploy URL in the superproject ADR)*
+**Live:** https://torihiki.pages.dev — reading
+[`torihiki-node`](https://github.com/kotoba-lang/torihiki-node) as it produces
+blocks.
 
 ## What is real here
 
-Every number on the page came out of the real engine. The order book is
-`torihiki.book`'s matching under price-time priority, the position and its
-unrealized PnL are `torihiki.clearing`, the funding rate is
-`torihiki.funding`'s premium index, and the state roots are SHA-256 over
-`torihiki.state`'s canonical encoding. `script/build.clj` drives 240 blocks
-through the engine at build time and renders the result.
+The book, the fills, the funding rate and the state roots are read from a live
+sequencer running the real engine in a Cloudflare Worker. Nothing is recorded
+and nothing is mocked. Earlier versions of this page replayed a session
+generated at build time; it now polls the node.
 
-**It is a recording, not a live venue**, and the page says so. The engine
-*does* run in a browser — the same ClojureScript sources reproduce a JVM
-validator's state root byte for byte, which `torihiki`'s `:parity` check
-proves — but executing it in the visitor's tab is a separate build that has
-not been done. Stating which one you are looking at costs one sentence and
-buys the difference between a demo and a claim.
+**It is a sequencer, not a chain.** One writer decides the order; nothing
+votes. The node says so in its own `/head` response and the page repeats it.
+
+## The browser renders with the same functions the server does
+
+`order-book`, `trades-panel`, `chain-panel` and `ticker-body` are pure hiccup
+functions. `script/build.clj` calls them to render the shell; the client calls
+the same ones and swaps the result in with `kotoba-ui.core/->html`.
+
+That replaced ~90 lines of hand-written JavaScript which built the same rows
+by string concatenation. Two renderers for one panel is two things to keep in
+agreement, and the JavaScript one could not use the design system's classes
+without repeating them by hand — which it did.
+
+## Failure is visible
+
+When the node is unreachable the status line says so instead of leaving the
+last good frame on screen. A terminal that silently shows stale prices is
+worse than one that admits it is disconnected: the first invites a trade.
 
 ## Build
 
 ```bash
-clojure -M:build     # engine → session → public/index.html
+npm install
+npx shadow-cljs release client   # browser bundle -> public/js/app.js
+clojure -M:build                 # shell         -> public/index.html
+npx wrangler pages deploy public --project-name torihiki
 ```
 
 ## Design system
 
 Built on the paved road (`kotoba-uiux` skill, ADR-2607122200): requires
 `kotoba-ui.core` only, one theme map, layout from shell, the eleven HIG text
-styles, no raw hex outside the theme. The app stylesheet is ~30 lines and
-covers what a design system has no opinion about — tabular numerals and a
-depth bar.
+styles, no raw hex outside the theme. App CSS is ~30 lines, covering what a
+design system has no opinion about — tabular numerals and a depth bar.
 
-Scored with `kotoba-lang/design-quality`:
+design-quality: **100.00**, no findings.
 
-```
-design-quality audit — 1 page(s)
-  100.00  public/index.html
-findings (headroom-first):
-  (none — converged)
-```
+## Known couplings
 
-`appkit` would be the right platform layer for a dense desktop terminal and is
-deliberately absent: its production `:deps` names kotoba-ui as
-`{:local/root "../kotoba-ui"}`, so any consumer depending on appkit through
-git cannot build a classpath. The repo already has a `:local` alias holding
-that override, which is where a sibling path belongs.
+`config.cljc` duplicates the node's tick and lot scale so the terminal can
+format integer ticks into dollars. The node already exposes both on `/market`;
+taking them from there is the right fix and is not done yet.
+
+`appkit` is absent because it cannot be depended on: its production `:deps`
+names kotoba-ui as `{:local/root "../kotoba-ui"}`, so any consumer depending
+on it through git cannot build a classpath.

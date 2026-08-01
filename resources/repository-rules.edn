@@ -10,6 +10,7 @@
   :prefix nil
   :role :application
   :execution :none
-  :must [:build-from-the-real-engine :state-what-is-recorded-vs-live]
-  :must-not [:mock-market-data :reimplement-engine-logic :require-liquid-glass-directly]
-  :depends-on ["kotoba-lang/torihiki" "kotoba-lang/kotoba-ui"]}}
+  :must [:read-a-live-node :state-that-it-is-a-sequencer :show-when-disconnected]
+  :must-not [:mock-market-data :reimplement-engine-logic :render-twice
+             :require-liquid-glass-directly]
+  :depends-on ["kotoba-lang/kotoba-ui" "kotoba-lang/torihiki-node"]}}
