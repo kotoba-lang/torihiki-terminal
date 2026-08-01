@@ -25,15 +25,19 @@
   Calling it a wallet would be the more impressive word for the same object
   and would invite somebody to treat it as one.
 
-  ## Claiming an account id
+  ## The account id comes from the key
 
-  Account ids are integers — the book stores them in a slab — so an id is
-  claimed by first use rather than derived from the key as an address. The id
-  is seeded from the public key so two browsers almost never collide, and
-  `:bound-key` from `/account` settles it when they do: an id already bound to
-  a different key is skipped before anything is signed, rather than discovered
-  as a `:wrong-key` rejection afterwards."
-  (:require [torihiki.auth :as auth]))
+  It used to be claimed by first use, and this walked candidates until it
+  found one nobody had taken. That is gone: a key may only claim the id
+  `torihiki.address/derive` gives it, and the chain refuses anything else.
+
+  The reason is not tidiness. First-use binding means whoever gets a
+  transaction in first owns the id — under a single sequencer, whoever asks
+  first; under consensus, whoever orders the block. A Byzantine leader claimed
+  an account that way in engi's harness and the owner was locked out of it
+  permanently."
+  (:require [torihiki.address :as addr]
+            [torihiki.auth :as auth]))
 
 (def ^:const storage-key "torihiki.session-key.v1")
 
@@ -93,22 +97,18 @@
 
 ;; ── seeding an account id ───────────────────────────────────────────────────
 
-(def ^:const id-floor
-  "Ids below this are left alone: the clearinghouse's backstop vault and the
-  oracle publishers are small integers configured at genesis, and a browser
-  wandering into one would be claiming a role rather than an account."
-  100000)
+(defn account-for
+  "The account id this key owns, from `torihiki.address` — the engine's own
+  derivation, not a second one written here.
 
-(defn seed-account
-  "A candidate id from the public key, offset by `n` for the collision walk.
-
-  Four bytes rather than a hash: this only has to spread, and the thing that
-  actually decides ownership is `:bound-key`."
-  [pub-b64 n]
-  (let [b (b64->bytes pub-b64)
-        raw (+ (* 16777216 (aget b 0)) (* 65536 (aget b 1))
-               (* 256 (aget b 2)) (aget b 3))]
-    (+ id-floor (mod (+ raw n) 900000000))))
+  There is nothing to walk any more. An id used to be claimed by first use, so
+  this seeded a candidate from the key and stepped along until it found one
+  nobody had taken; now a key may only claim the id derived from it, and the
+  chain refuses anything else with `:not-your-account`. Deriving it in the
+  browser and having the chain derive something different would be a user who
+  cannot sign for the account they are shown."
+  [pub-b64]
+  (addr/derive pub-b64))
 
 ;; ── signing ─────────────────────────────────────────────────────────────────
 

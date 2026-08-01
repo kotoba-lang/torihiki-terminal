@@ -1,7 +1,9 @@
 __hash:v
 _hash:Xa
 _meta:ta
+_next:yc
 _rest:vb
+_seq:zc
 afn:u
 arr:i
 base:wb
@@ -11,6 +13,7 @@ buffer_:Ea
 chunk:T
 chunk_next:qb
 ci:rb
+cljs$core$APersistentVector$:Ac
 cljs$core$IAssociative$:Jb
 cljs$core$IAssociative$_assoc$arity$3:za
 cljs$core$IAssociative$_contains_key_QMARK_$arity$2:Ya

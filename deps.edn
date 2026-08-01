@@ -8,7 +8,7 @@
         ;; second one in JavaScript and keep them in agreement by hand.
         io.github.kotoba-lang/torihiki
         {:git/url "https://github.com/kotoba-lang/torihiki.git"
-         :git/sha "e686ff4e8081a6d1b298e84e6947c2e3fe5d33ee"}
+         :git/sha "b1eba4d60d935575a72b663a2fde9dfe5676ec35"}
         io.github.kotoba-lang/kotoba-ui
         {:git/url "https://github.com/kotoba-lang/kotoba-ui.git"
          :git/sha "80445c9dbafef5402d1aee8409fb6fcfa35cef4d"}}

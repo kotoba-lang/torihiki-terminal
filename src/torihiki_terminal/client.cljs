@@ -140,24 +140,16 @@
 
 ;; ── claiming an id ──────────────────────────────────────────────────────────
 
-(defn- claim-account
-  "Walk candidate ids until one is unclaimed or already ours.
+(defn- account-for
+  "The account this key owns. No lookup and no walk: the id is derived from
+  the key, so it is known before the node is asked anything.
 
-  Bounded: an unbounded walk against an unreachable node is a page that spins
-  forever with no explanation. Ten is far past what a 30-bit seed collides at,
-  so exhausting it means something else is wrong and should be said."
+  A stored id wins when there is one. Sessions that predate the derivation
+  walked to an id and BOUND their key to it, and that binding is immutable —
+  showing them their derived id instead would show them an empty account and
+  leave the balance they had behind a key that can still sign for it."
   [k]
-  (letfn [(step [n]
-            (if (>= n 10)
-              (js/Promise.resolve nil)
-              (let [id (tkeys/seed-account (:public k) n)]
-                (-> (fetch-json (str "/account?id=" id))
-                    (.then (fn [a]
-                             (let [bound (:bound-key a)]
-                               (if (or (nil? bound) (= bound (:public k)))
-                                 id
-                                 (step (inc n))))))))))]
-    (if-let [id (:account k)] (js/Promise.resolve id) (step 0))))
+  (or (:account k) (tkeys/account-for (:public k))))
 
 ;; ── submitting ──────────────────────────────────────────────────────────────
 
@@ -293,18 +285,13 @@
                "This browser has no Ed25519 in WebCrypto, so this page can read the chain but cannot sign anything for it.")
     (-> (tkeys/load-or-create!)
         (.then (fn [k]
-                 (swap! session assoc :key k)
-                 (claim-account k)))
-        (.then (fn [id]
-                 (if id
-                   (do (tkeys/remember-account! (:key @session) id)
-                       (swap! session assoc :account id)
-                       (tick!))
-                   (set-text! "tk-session-note"
-                              "Could not claim an account id: every candidate is bound to another key, which should not happen and means something else is wrong."))))
+                 (let [id (account-for k)]
+                   (tkeys/remember-account! k id)
+                   (swap! session assoc :key k :account id)
+                   (tick!))))
         (.catch (fn [e]
                   (set-text! "tk-session-note"
-                             "Could not start a session — the node did not answer.")
+                             "Could not start a session — no key could be generated.")
                   (js/console.error "torihiki-terminal:" e)))))
   (tick!)
   (js/setInterval tick! 1500))
