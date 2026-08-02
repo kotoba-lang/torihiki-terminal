@@ -73,7 +73,7 @@
                  ;; Exit non-zero on failure: a verification script that always
                  ;; succeeds is the same category of object as a page that
                  ;; always renders.
-                 (let [ok (and (re-find #"accepted at block" os)
+                 (let [ok (and (re-find #"queued|accepted" os)
                                (re-find #"^live · block" st))]
                    (println (if ok "VERIFY: pass" "VERIFY: FAIL"))
                    (when-not ok (set! (.-exitCode js/process) 1)))))

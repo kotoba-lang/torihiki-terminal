@@ -57,13 +57,22 @@
 
 (defonce session (atom {:key nil :account nil :chain-id nil :busy false}))
 
+(def ^:const witness
+  "Which replica this page reads from. They agree — the status line says so by
+  fetching all four — but a page has to read the book from ONE of them, or a
+  bid and an ask a block apart would look like a spread that is not there."
+  "w1")
+
+(defn- with-w [path]
+  (str path (if (re-find #"\?" path) "&" "?") "w=" witness))
+
 (defn- fetch-json [path]
-  (-> (js/fetch (str node-url path))
+  (-> (js/fetch (str node-url (with-w path)))
       (.then #(.json %))
       (.then #(js->clj % :keywordize-keys true))))
 
 (defn- post-json [path body]
-  (-> (js/fetch (str node-url path)
+  (-> (js/fetch (str node-url (with-w path))
                 #js {:method "POST"
                      :headers #js {"content-type" "application/json"}
                      :body (js/JSON.stringify (clj->js body))})
@@ -185,7 +194,15 @@
             (.then (fn [envelope] (post-json "/tx" envelope)))
             (.then (fn [r]
                      (if (:ok r)
-                       (set-order-status! true (str "accepted at block " (:height r)))
+                       ;; Queued, not landed. On a single sequencer /tx
+                       ;; returns the height the transaction landed at,
+                       ;; because the node that answers is the node that
+                       ;; ordered it. On a BFT chain the two are different
+                       ;; events: this replica has accepted the transaction
+                       ;; into its mempool and some later block will carry it.
+                       ;; Saying "accepted at block" here would name a height
+                       ;; that has not happened.
+                       (set-order-status! true "queued — a block will carry it")
                        ;; the chain gave a reason; reporting "failed" instead
                        ;; would throw away the only useful part of the answer
                        (set-order-status! false (str "refused: " (or (:reason r) "unknown"))))
@@ -272,7 +289,37 @@
                  (swap! session assoc :chain-id (:chain-id head))
                  (render! (frame head market* book trades acct))
                  (when account (render-session! acct))
-                 (set-status! true (str "live · block " (:height head)))))
+                 (set-status! true (str "live · block " (:height head)))
+                 ;; Ask the other three what they hold. A single node saying
+                 ;; it is live is a single node's word for it; four roots on
+                 ;; the screen is the property that matters, or its absence.
+                 (-> (js/Promise.all
+                      (clj->js (map (fn [w]
+                                      (-> (js/fetch (str node-url "/head?w=" w))
+                                          (.then #(.json %))
+                                          (.then #(js->clj % :keywordize-keys true))
+                                          (.catch (fn [_] nil))))
+                                    ["w1" "w2" "w3" "w4"])))
+                     (.then (fn [hs]
+                              ;; Compared at the SAME height. Replicas are
+                              ;; legitimately a block or two apart at any
+                              ;; instant, and comparing their roots as-of-now
+                              ;; called that a disagreement — a status line
+                              ;; that cries wolf every few seconds teaches the
+                              ;; reader to ignore the one time it matters.
+                              (let [hs (remove nil? hs)
+                                    by-h (group-by :height hs)
+                                    split (some (fn [[_ g]]
+                                                  (> (count (set (map :state-root g))) 1))
+                                                by-h)]
+                                (set-status!
+                                 (not split)
+                                 (str "live · block " (:height head) " · "
+                                      (count hs) " replicas, "
+                                      (if split
+                                        "DISAGREEING at one height"
+                                        "agreeing"))))))
+                     (.catch (fn [_] nil)))))
         (.catch (fn [e]
                   ;; say it, do not freeze on the last good frame
                   (set-status! false "disconnected — the numbers below are stale")
