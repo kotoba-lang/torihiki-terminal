@@ -16,6 +16,9 @@
   where a sibling path belongs. Filed rather than worked around silently."
   (:require [clojure.string :as str]
             [kotoba-ui.core :as ui]
+            [torihiki-chart.candle :as tc]
+            [torihiki-chart.depth :as td]
+            [torihiki-chart.view :as tcv]
             [torihiki-terminal.config :as cfg]))
 
 (def theme
@@ -113,8 +116,55 @@
        [:div {:class (str "tk-row tk-row--" (if (zero? (:side t)) "bid" "ask"))}
         [:span {:class "tk-px"} (usd (:level t))]
         [:span {:class "tk-sz"} (coins (:qty t))]
-        [:span {:class "tk-cum"} (quot (:ts t) 1000)]])]]
+        ;; The block, not a time. It used to arrive as `(* 1000 h)` and be
+        ;; divided back here — a round trip through milliseconds that do not
+        ;; exist, since the engine has no wall clock.
+        [:span {:class "tk-cum"} (:h t)]])]]
    {:class "tk-trades"}))
+
+(defn chart-panel
+  "Block candles and the depth of the book.
+
+  **The x axis is block height, not time.** The engine has no wall clock —
+  logical time arrives in the block header — so a fill carries `:h` and
+  nothing else to order it by. Drawing these as if they were evenly spaced
+  minutes would be inventing a fact the chain does not have, and a block's
+  real duration is not constant: a view change or a Durable Object eviction
+  stretches it. The labels read `#4218` for that reason; `12:04` would look
+  like a clock.
+
+  The span is chosen from the tape's own height range rather than fixed,
+  because the tape is bounded by COUNT (200 fills) and so the range it covers
+  depends on how busy the book is — quiet, 200 fills span thousands of blocks;
+  busy, a few dozen.
+
+  When there are no fills this says so instead of drawing an empty frame. An
+  empty frame does not read as \"no data\", it reads as \"no price\"."
+  [frame]
+  (let [tape (:trades frame)
+        span (tc/auto-span 48 tape)
+        candles (tc/candles span tape)]
+    (ui/panel
+     [[:div {:class "tk-panel-head"}
+       [:span {:class "hig-headline"} "Chart"]
+       [:span {:class "hig-caption2 tk-dim"}
+        (if (seq candles)
+          (str span " block" (when (> span 1) "s") " per candle")
+          "block candles")]]
+      (if-let [svg (tcv/candle-chart {:candles candles
+                                      :tick-cents cfg/tick-usd-cents
+                                      :height 260})]
+        [:div {:class "tk-chart"} svg]
+        [:p {:class "hig-footnote tk-dim"} "No fills on the chain yet."])
+      [:div {:class "tk-panel-head tk-chart-sub"}
+       [:span {:class "hig-caption2 tk-dim"} "Book depth"]
+       [:span {:class "hig-caption2 tk-dim"} "cumulative, from the node"]]
+      (if-let [svg (td/depth-chart {:bids (:bids frame) :asks (:asks frame)
+                                    :tick-cents cfg/tick-usd-cents
+                                    :height 140})]
+        [:div {:class "tk-chart"} svg]
+        [:p {:class "hig-footnote tk-dim"} "The book is empty."])]
+     {:class "tk-chart-panel"})))
 
 (defn order-entry []
   (ui/panel
@@ -261,6 +311,7 @@
      [:div {:class "tk-live"}
       [:span {:id "tk-status" :class "hig-caption2 tk-dim"} "connecting to the node…"]]
      (ticker f)
+     [:div {:id "tk-chart-panel"} (chart-panel f)]
      [:div {:class "tk-grid"}
       [:div {:id "tk-book-panel"} (order-book f)]
       (ui/stack {:gap :3}
@@ -348,6 +399,9 @@
   padding:var(--hig-spacing-2);margin:var(--hig-spacing-1) 0}
 .tk-kv{display:flex;justify-content:space-between;gap:var(--hig-spacing-3)}
 .tk-root code{word-break:break-all}
+.tk-chart{width:100%;overflow-x:auto}
+.tk-chart svg{display:block;width:100%;height:auto}
+.tk-chart-sub{margin-top:var(--hig-spacing-3)}
 ")
 
 (defn render-page [session]

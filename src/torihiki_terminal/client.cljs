@@ -120,8 +120,16 @@
      :oracle (:oracle market*)
      :bids (:bids book)
      :asks (:asks book)
+     ;; `:h` — the block, carried as the block.
+     ;;
+     ;; This used to read `:ts (* 1000 (:h t))`, and the trades panel divided
+     ;; it back by a thousand to get the block again. A round trip through a
+     ;; unit that does not exist: the engine has no wall clock, so there is no
+     ;; timestamp to be had, and dressing a height up as milliseconds is the
+     ;; beginning of reading it as a time. The chart makes that concrete —
+     ;; block candles have to know they are block candles.
      :trades (mapv (fn [t] {:level (:level t) :qty (:qty t)
-                            :side (:side t) :ts (* 1000 (:h t))})
+                            :side (:side t) :h (:h t)})
                    (:trades trades))
      ;; From /account, not from a literal. An account with nothing open
      ;; genuinely has no position, which is a different statement from "we
@@ -135,6 +143,7 @@
      :root (:state-root head)}))
 
 (defn- render! [f]
+  (swap-html! "tk-chart-panel" (view/chart-panel f))
   (swap-html! "tk-book-panel" (view/order-book f))
   (swap-html! "tk-trades-panel" (view/trades-panel f))
   (swap-html! "tk-chain-panel" (view/chain-panel f nil))

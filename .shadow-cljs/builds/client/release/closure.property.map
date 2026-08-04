@@ -4,10 +4,16 @@ _meta:ta
 _next:yc
 _rest:vb
 _seq:zc
+add_left:Kc
+add_right:Lc
 afn:u
 arr:i
+ascending_QMARK_:Hc
+balance_left:Mc
+balance_right:Nc
 base:wb
 bitmap:H
+blacken:Cc
 buf:xb
 buffer_:Ea
 chunk:T
@@ -24,6 +30,8 @@ cljs$core$IChunkedSeq$_chunked_first$arity$1:fb
 cljs$core$IChunkedSeq$_chunked_rest$arity$1:Aa
 cljs$core$ICollection$:ac
 cljs$core$ICollection$_conj$arity$2:V
+cljs$core$IComparable$:Fc
+cljs$core$IComparable$_compare$arity$2:Dc
 cljs$core$ICounted$:Eb
 cljs$core$ICounted$_count$arity$1:M
 cljs$core$IDeref$_deref$arity$1:Kb
@@ -101,6 +109,7 @@ cljs$core$ISeqable$:Vb
 cljs$core$ISeqable$_seq$arity$1:I
 cljs$core$ISequential$:Gb
 cljs$core$ISet$:lc
+cljs$core$IStack$_peek$arity$1:Gc
 cljs$core$ISwap$_swap_BANG_$arity$2:tc
 cljs$core$ISwap$_swap_BANG_$arity$3:uc
 cljs$core$ISwap$_swap_BANG_$arity$4:vc
@@ -122,6 +131,7 @@ cljs$lang$protocol_mask$partition1$:B
 cljs$lang$type:Wb
 cnt:l
 collision_hash:wa
+comp:Bc
 edit:G
 editable_QMARK_:cb
 ensure_editable:Ua
@@ -150,6 +160,8 @@ nil_val:ha
 nodes:sa
 ns:pb
 off:ca
+prev_seed:Jc
+redden:Ic
 rest:ya
 root_iter:Ib
 s:C
@@ -158,6 +170,7 @@ seen:Db
 str:Da
 tail:ja
 transient_map:Wa
+tree:Ec
 v:Zb
 val:A
 validator:xc
