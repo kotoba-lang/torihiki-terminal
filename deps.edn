@@ -11,7 +11,16 @@
          :git/sha "b1eba4d60d935575a72b663a2fde9dfe5676ec35"}
         io.github.kotoba-lang/kotoba-ui
         {:git/url "https://github.com/kotoba-lang/kotoba-ui.git"
-         :git/sha "80445c9dbafef5402d1aee8409fb6fcfa35cef4d"}}
+         :git/sha "80445c9dbafef5402d1aee8409fb6fcfa35cef4d"}
+        ;; The chart. Pure data -> SVG geometry, no DOM and no fetch, so the
+        ;; server shell and the browser client build it with the same call —
+        ;; the same property that let the JavaScript row-builder be deleted.
+        ;;
+        ;; It pulls kotoba-lang/d3 (a native cljc reimplementation of d3-scale
+        ;; and d3-shape, not a wrapper around d3.js) transitively.
+        io.github.kotoba-lang/torihiki-chart
+        {:git/url "https://github.com/kotoba-lang/torihiki-chart.git"
+         :git/sha "850fc19ac5e4774ad8fe4e153fb88599a70dc40a"}}
  :aliases
  {:build {:extra-paths ["script"] :main-opts ["-m" "build"]}
   :test {:extra-paths ["test"]
