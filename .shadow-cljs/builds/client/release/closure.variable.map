@@ -1,4 +1,4 @@
-G__20286$jscomp$inline_1063:$o
+G__20317$jscomp$inline_1066:bp
 JSCompiler_StaticMethods_assoc_BANG_:Ne
 JSCompiler_StaticMethods_cljs$core$ITransientVector$_assoc_n_BANG_$arity$3:Wd
 JSCompiler_StaticMethods_entry_at:Ql
@@ -721,7 +721,7 @@ css$core$media:Jn
 css$core$rule:In
 css$core$unitless:Vo
 css$core$value_str:Fn
-cur$jscomp$inline_1075:bp
+cur$jscomp$inline_1078:dp
 goog$UID_PROPERTY_:fh
 goog$getUid:pg
 goog$global:eh
@@ -757,9 +757,9 @@ module$contents$goog$array_defaultCompare:Ug
 module$contents$goog$array_sort:Vg
 module$contents$goog$array_stableSort:Ok
 module$contents$goog$object_getKeys:aa
-or__5002__auto__$jscomp$inline_1062:Zo
-part$jscomp$inline_1076:cp
-parts$jscomp$inline_1074:ap
+or__5002__auto__$jscomp$inline_1065:ap
+part$jscomp$inline_1079:ep
+parts$jscomp$inline_1077:cp
 shitsuke$hiccup$__GT_html:Uf
 shitsuke$hiccup$assert_no_rawtext_breakout_BANG_:Sf
 shitsuke$hiccup$raw_text_content:Qf
@@ -785,11 +785,13 @@ torihiki_chart$axis$height_ticks:vm
 torihiki_chart$axis$mantissas:sm
 torihiki_chart$axis$nice_step:tm
 torihiki_chart$axis$ticks:um
+torihiki_chart$candle$absorb:em
 torihiki_chart$candle$auto_span:km
 torihiki_chart$candle$candles:jm
 torihiki_chart$candle$extent:lm
-torihiki_chart$candle$fold_fill:em
+torihiki_chart$candle$join:Zo
 torihiki_chart$candle$normalize_side:hm
+torihiki_chart$candle$rebucket:$o
 torihiki_chart$candle$volume_max:mm
 torihiki_chart$depth$default_opts:Dm
 torihiki_chart$depth$depth_chart:hn

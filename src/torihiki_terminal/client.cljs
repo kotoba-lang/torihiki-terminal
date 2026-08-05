@@ -310,10 +310,31 @@
               (fetch-json "/book?depth=11") (fetch-json "/trades?n=14")
               (if account
                 (fetch-json (str "/account?id=" account))
-                (js/Promise.resolve {}))])
-        (.then (fn [[head market* book trades acct]]
+                (js/Promise.resolve {}))
+              ;; The chart's history, from the chain rather than from the
+              ;; tape. The tape is bounded by COUNT — 200 fills is a few dozen
+              ;; blocks on a busy book — so a chart folded from it cannot see
+              ;; further back than that however wide a window it asks for.
+              ;;
+              ;; Asked for at the FINEST granularity and rebucketed here, so
+              ;; the visible density stays the same as the window changes —
+              ;; the server has no idea how wide the panel is. `rebucket`'s
+              ;; boundaries are absolute, so this is the same answer the
+              ;; server would give for the coarser span.
+              ;;
+              ;; Tolerated missing rather than required: a replica running a
+              ;; version without the endpoint answers 404, and the chart falls
+              ;; back to folding the tape. A page that showed nothing because
+              ;; one node was mid-deploy would be a worse answer than a short
+              ;; chart.
+              (-> (fetch-json "/candles?span=1&n=1000")
+                  (.catch (fn [_] nil)))])
+        (.then (fn [[head market* book trades acct candles]]
                  (swap! session assoc :chain-id (:chain-id head))
-                 (render! (frame head market* book trades acct))
+                 (render! (assoc (frame head market* book trades acct)
+                                 :candles (when (seq (:candles candles))
+                                            (:candles candles))
+                                 ))
                  (when account (render-session! acct))
                  (set-status! true (str "live · block " (:height head)))
                  ;; Ask the other three what they hold. A single node saying
