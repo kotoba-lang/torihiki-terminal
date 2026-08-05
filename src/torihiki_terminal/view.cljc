@@ -143,14 +143,29 @@
   empty frame does not read as \"no data\", it reads as \"no price\"."
   [frame]
   (let [tape (:trades frame)
-        span (tc/auto-span 48 tape)
-        candles (tc/candles span tape)]
+        ;; The chain's candles when it has them, the tape's when it does not.
+        ;;
+        ;; Folding the tape was the only option while `/candles` lived on the
+        ;; sequencer and this page read the validators — so the chart could
+        ;; never show more than the tape's 200 fills, which on a busy book is
+        ;; a few dozen blocks. Both paths use the same fold, so the picture
+        ;; does not change shape when the source does; only how far back it
+        ;; reaches.
+        from-chain (seq (:candles frame))
+        ;; One span rule for both sources: the height range the data covers,
+        ;; divided into about 48 candles, rounded onto the 1/2/5×10^k ladder
+        ;; so the boundaries stop moving when one more fill arrives.
+        span (tc/auto-span 48 (or from-chain tape))
+        candles (if from-chain
+                  (tc/rebucket span from-chain)
+                  (tc/candles span tape))]
     (ui/panel
      [[:div {:class "tk-panel-head"}
        [:span {:class "hig-headline"} "Chart"]
        [:span {:class "hig-caption2 tk-dim"}
         (if (seq candles)
-          (str span " block" (when (> span 1) "s") " per candle")
+          (str span " block" (when (> span 1) "s") " per candle"
+               (when from-chain " · from the chain"))
           "block candles")]]
       (if-let [svg (tcv/candle-chart {:candles candles
                                       :tick-cents cfg/tick-usd-cents
