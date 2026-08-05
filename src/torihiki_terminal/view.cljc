@@ -220,12 +220,15 @@
       [:span "Free"] [:span {:id "tk-free" :class "tk-px"} "—"]]
      [:div {:class "tk-kv hig-footnote"}
       [:span "Next nonce"] [:span {:id "tk-nonce" :class "tk-px"} "—"]]
-     (ui/button "Mint 100,000 test USD" {:act :faucet :class "tk-faucet"})
+     (ui/button "Request 100,000 test USD" {:act :faucet :class "tk-faucet"})
      [:p {:id "tk-session-note" :class "hig-caption2 tk-dim"}
       "Session key generated in this browser and kept in local storage. Not a
        wallet: it holds nothing outside this devnet, and clearing site data
-       destroys it. Collateral here is minted on request — there is no bridge,
-       so every balance on this chain was asked for rather than deposited."])]
+       destroys it. Collateral is issued by the chain's bridge authority, which
+       signs every deposit and grants once per account — the key is the node's
+       and never reaches this browser. It backs nothing outside this devnet:
+       the certificate says who issued the collateral, not that anything was
+       deposited for it."])]
    {:class "tk-session"}))
 
 (defn positions-panel [frame]

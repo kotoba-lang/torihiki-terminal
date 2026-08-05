@@ -257,11 +257,28 @@
                       :level level :qty qty :flags (flags)}))))
 
 (defn- faucet! []
-  ;; A deposit signed by the account crediting itself — which is what a deposit
-  ;; is on a chain with no bridge. The engine supports naming a bridge
-  ;; authority and this devnet deliberately does not set one, so the button
-  ;; says "mint" rather than dressing the same act up as funding.
-  (submit! {:tx :deposit :market market :amount 10000000}))
+  ;; ASKS the bridge; it no longer mints.
+  ;;
+  ;; This used to sign a deposit crediting itself, which is what a deposit is
+  ;; on a chain with no issuer — and that chain had none, so every balance on
+  ;; it was conjured by whoever wanted one. The chain now names a bridge
+  ;; authority, `torihiki.api` refuses a deposit from anybody else, and the
+  ;; browser does not hold that key and must not: a faucet whose key reaches
+  ;; the client is not an issuer, it is a formality.
+  ;;
+  ;; So the node signs, and what comes back is a queued transaction like any
+  ;; other. Nothing is credited here.
+  (-> (post-json "/faucet" {:account (:account @session)})
+      (.then (fn [j]
+               (set-order-status!
+                (true? (:ok j))
+                (case (:reason j)
+                  "already-funded" "The bridge grants once per account — you already have collateral."
+                  "bad-account" "No session account yet."
+                  (if (:ok j)
+                    "The bridge signed a deposit — a block will carry it"
+                    (str "Faucet refused: " (or (:reason j) "unknown")))))))
+      (.catch (fn [e] (set-order-status! false (str "Faucet unreachable: " e))))))
 
 (defn- toggle-chip! [^js e]
   (let [on? (= "1" (.. e -dataset -tkOn))]
