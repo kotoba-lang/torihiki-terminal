@@ -362,11 +362,20 @@
        "stale prices invites a trade."]
       (ui/grid
        {:min "230px"}
-       (ui/panel [[:h3 {:class "hig-headline"} "3,155,313 ops/sec"]
+       (ui/panel [[:h3 {:class "hig-headline"} "604 ms per block"]
                   [:p {:class "hig-footnote tk-dim"}
-                   "Measured matching throughput, 317 ns/op — 15.8x HyperCore's "
-                   "documented 200,000 orders/sec. Execution only; the live "
-                   "node is nowhere near that, and nothing here claims it is."]])
+                   "Measured on this deployment: 1.66 blocks/sec, and 2.6 "
+                   "seconds from submitting an order to seeing it. Hyperliquid "
+                   "publishes a median around 0.07 s, so this is roughly "
+                   "forty times slower end to end."]])
+       (ui/panel [[:h3 {:class "hig-headline"} "Engine: not what we claimed"]
+                  [:p {:class "hig-footnote tk-dim"}
+                   "This panel used to read \"3,155,313 ops/sec — 15.8x "
+                   "HyperCore\". That number does not reproduce: the same "
+                   "benchmark on the same code measured 5,639 and 25,314 "
+                   "ops/sec on two runs of a loaded machine. Until it is "
+                   "measured somewhere quiet, the claim is withdrawn rather "
+                   "than restated with a smaller number."]])
        (ui/panel [[:h3 {:class "hig-headline"} "Sequencer, not consensus"]
                   [:p {:class "hig-footnote tk-dim"}
                    "One writer decides the order. Nothing votes. The log is "
