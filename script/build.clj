@@ -10,6 +10,7 @@
   is as old as the last deploy, which is the failure mode the status line
   exists to prevent."
   (:require [clojure.java.io :as io]
+            [clojure.set]
             [clojure.string]
             [torihiki-terminal.view :as view]))
 
@@ -44,9 +45,50 @@
     (throw (ex-info (str "build: " bundle " has not been compiled — run shadow-cljs release client")
                     {:bundle bundle}))))
 
+(def ^:private known-undefined-tokens
+  "`--hig-*` references this build tolerates, by name and with a reason.
+
+  Both come from `kotoba-ui/product.cljc`, which styles `.kotoba-product__*`
+  — classes this page never emits, so the rules never match anything here.
+  They are upstream defects rather than ours, and listing them by name is what
+  keeps this guard from being switched off wholesale the first time it fires."
+  #{"--hig-color-accent"       ; kotoba-ui product.cljc, unused on this page
+    "--hig-radius-large"})     ; likewise; the real name is --hig-radius-lg
+
+(defn- check-tokens!
+  "Refuse to write a document that reads a design token nothing defines.
+
+  An undefined custom property does NOT fall back to an inherited or initial
+  value — it makes the whole declaration invalid, so the property simply does
+  not apply. Nothing errors, nothing logs, and the result looks like a design
+  choice. This page shipped three of them for its whole life:
+  `--hig-label-secondary`, `--hig-color-accent` and `--hig-radius-1`, none of
+  which `shitsuke.hig` has ever emitted. Dimmed text was not dimmed, an active
+  flag chip had no outline, and book rows had square corners.
+
+  They were found by hand while adding the DADS skin. This is so the next one
+  is found by the build."
+  [html]
+  (let [used (set (map second (re-seq #"var\((--hig-[a-z0-9-]+)\)" html)))
+        defined (set (map second (re-seq #"(--hig-[a-z0-9-]+)\s*:" html)))
+        dead (sort (remove known-undefined-tokens (clojure.set/difference used defined)))]
+    (when (seq dead)
+      (throw (ex-info (str "build: the document reads design tokens nothing defines: "
+                           (clojure.string/join ", " dead)
+                           " — an undefined custom property invalidates the whole "
+                           "declaration, so this would ship as a silent style loss")
+                      {:tokens dead})))))
+
 (defn -main [& _]
-  (let [html (view/render-page {:frames [zero-frame] :meta {:blocks 0}})]
+  (let [;; The vendored デジタル庁 stylesheet, read here because `view` and
+        ;; `skin` must compile under ClojureScript, where there is no resource
+        ;; to slurp. `io/resource` finds it on the jp-go-dds dependency's
+        ;; classpath — it is not copied into this repo, so a re-vendor
+        ;; upstream reaches this page by advancing the pin and nothing else.
+        dds-css (slurp (io/resource "jp_go_dds/dds.css"))
+        html (view/render-page {:frames [zero-frame] :meta {:blocks 0}} dds-css)]
     (check-bundle! html)
+    (check-tokens! html)
     (io/make-parents "public/index.html")
     (spit "public/index.html" html)
     (println "wrote public/index.html" (format "(%.1f KB)" (/ (count html) 1024.0))

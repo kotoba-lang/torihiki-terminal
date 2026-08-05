@@ -18,6 +18,12 @@
         ;;
         ;; It pulls kotoba-lang/d3 (a native cljc reimplementation of d3-scale
         ;; and d3-shape, not a wrapper around d3.js) transitively.
+        ;; The skin. デジタル庁 DADS primitives plus the `--hig-*` bridge that
+        ;; maps this page's token contract onto them — see torihiki-terminal.skin
+        ;; for why it is a skin over kotoba-ui rather than a replacement of it.
+        io.github.kotoba-lang/jp-go-digital-design-system
+        {:git/url "https://github.com/kotoba-lang/jp-go-digital-design-system.git"
+         :git/sha "4324cc785792dac0c801ab17dcc22d2d03e24812"}
         io.github.kotoba-lang/torihiki-chart
         {:git/url "https://github.com/kotoba-lang/torihiki-chart.git"
          :git/sha "850fc19ac5e4774ad8fe4e153fb88599a70dc40a"}}

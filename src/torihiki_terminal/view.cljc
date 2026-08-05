@@ -19,7 +19,8 @@
             [torihiki-chart.candle :as tc]
             [torihiki-chart.depth :as td]
             [torihiki-chart.view :as tcv]
-            [torihiki-terminal.config :as cfg]))
+            [torihiki-terminal.config :as cfg]
+            [torihiki-terminal.skin :as skin]))
 
 (def theme
   "The only place a hex color is legitimate in app code (agent-guide rule 5)."
@@ -368,10 +369,23 @@
 (def app-css
   "Unlayered, so it wins over the library layers without any specificity
   fight (agent-guide rule 3). Confined to what a design system has no opinion
-  about: tabular numerals and a depth bar."
+  about: tabular numerals and a depth bar.
+
+  ## Three of these tokens did not exist
+
+  `--hig-label-secondary`, `--hig-color-accent` and `--hig-radius-1` are not
+  names `shitsuke.hig` emits — the real ones are `--hig-color-secondary-label`,
+  `--hig-color-tint` and `--hig-radius-xs`. An undefined custom property does
+  not fall back, it makes the whole declaration invalid, so `.tk-dim` had no
+  colour of its own, an active flag chip showed no outline, and book rows had
+  square corners. All three looked like design choices.
+
+  Found by checking every token this file uses against
+  `jp-go-dds.tokens/bridged?` while adding the DADS skin — the swap needed to
+  know which tokens had to survive it, and three of them were already gone."
   "
 .tk-px,.tk-sz,.tk-cum{font-variant-numeric:tabular-nums;font-feature-settings:'tnum'}
-.tk-dim{color:var(--hig-label-secondary)}
+.tk-dim{color:var(--hig-color-secondary-label)}
 .tk-up{color:var(--hig-palette-green)}
 .tk-down{color:var(--hig-palette-red)}
 .tk-live{padding-top:var(--hig-spacing-2)}
@@ -387,7 +401,7 @@
   gap:var(--hig-spacing-2);padding:2px var(--hig-spacing-2)}
 .tk-postable .tk-col-head,.tk-postable .tk-row{grid-template-columns:1fr 1fr 1fr 1fr}
 .tk-chip-on{outline:2px solid var(--hig-color-accent);outline-offset:-2px}
-.tk-row{position:relative;border-radius:var(--hig-radius-1)}
+.tk-row{position:relative;border-radius:var(--hig-radius-xs)}
 .tk-row>span{position:relative;z-index:1;text-align:right;min-width:0}
 .tk-row>span:first-of-type{text-align:left}
 .tk-bar{position:absolute;inset:0 auto 0 0;z-index:0;border-radius:inherit;opacity:.16}
@@ -404,7 +418,10 @@
 .tk-chart-sub{margin-top:var(--hig-spacing-3)}
 ")
 
-(defn render-page [session]
+(defn render-page
+  "`dds-css` is the vendored デジタル庁 stylesheet, read by the caller. Passing
+  it in keeps this namespace free of I/O so the browser build can require it."
+  [session dds-css]
   (ui/->page {:title "torihiki — BTC-PERP"
               :description
               "An open reimplementation of Hyperliquid's closed HyperCore: order book, clearinghouse, funding and liquidation as one deterministic state machine."
@@ -419,6 +436,12 @@
               ;; never referenced from the document. Nothing catches that: the
               ;; build succeeds, the bundle exists, the HTML validates, and the
               ;; design audit scores a page that does nothing.
-              :head [[:style app-css]
+              ;; Order matters and is one-way: the skin redefines `--hig-*`
+              ;; onto DADS primitives, and `app-css` reads them. Emitting the
+              ;; app first would have it read the values the skin is about to
+              ;; replace — which produces a page that is correct on reload and
+              ;; wrong on first paint, the worst of the two.
+              :head [[:style [:hiccup/raw (skin/skin-css dds-css)]]
+                     [:style app-css]
                      [:script {:type "module" :src "/js/app.js" :defer true}]]}
              (view session)))
