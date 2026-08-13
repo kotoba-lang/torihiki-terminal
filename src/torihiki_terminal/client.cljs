@@ -87,6 +87,9 @@
 ;; A comment rather than a docstring: `defonce` takes two arguments.
 (defonce witness (atom "w1"))
 
+;; height -> {witness -> state-root}, bounded. See the comparison in `tick!`.
+(defonce ^:private seen-roots (atom {}))
+
 (defn- with-w [path]
   (str path (if (re-find #"\?" path) "&" "?") "w=" @witness))
 
@@ -386,22 +389,42 @@
                                     ;; Who is in the majority, and is this page
                                     ;; reading one of them?
                                     ;;
-                                    ;; The `split` flag above is a warning and
-                                    ;; nothing more — it fires on the first
-                                    ;; height where two roots differ, which is
-                                    ;; also what a page one block behind looks
-                                    ;; like. `minority` is a claim about a
-                                    ;; NAMED replica, so it takes the height
-                                    ;; with the most witnesses at it and only
-                                    ;; speaks when there is a strict majority
-                                    ;; to be outside of.
-                                    [_ g] (last (sort-by (comp count val) by-h))
-                                    tally (frequencies (map :state-root g))
-                                    [top n] (last (sort-by val tally))
-                                    majority (when (and top (> (* 2 n) (count g)))
-                                               (set (map :witness
-                                                         (filter #(= top (:state-root %)) g))))
+                                    ;; Accumulated across ticks, not judged
+                                    ;; within one. Four replicas at ~3 blocks a
+                                    ;; second are rarely all at the same height
+                                    ;; in one sample, and the first version of
+                                    ;; this judged the largest same-height
+                                    ;; group whatever its size — so a group of
+                                    ;; ONE became a majority of one (`2*1 > 1`)
+                                    ;; and the page either stayed put for no
+                                    ;; reason or moved for no reason. It said
+                                    ;; `agreeing` while w1 was demonstrably
+                                    ;; outvoted.
+                                    ;;
+                                    ;; Remembering what each witness said at
+                                    ;; each height lets the comparison wait
+                                    ;; until a quorum has reported the SAME
+                                    ;; height, which is the only comparison
+                                    ;; that means anything.
+                                    _ (swap! seen-roots
+                                             (fn [m]
+                                               (let [m (reduce (fn [acc d]
+                                                                 (assoc-in acc [(:height d) (:witness d)]
+                                                                           (:state-root d)))
+                                                               m hs)]
+                                                 ;; bounded: keep the newest 64
+                                                 (into {} (take-last 64 (sort-by key m))))))
+                                    judged (->> @seen-roots
+                                                (filter (fn [[_ by-w]] (>= (count by-w) 3)))
+                                                (sort-by key)
+                                                last)
+                                    by-w (second judged)
+                                    tally (frequencies (vals by-w))
+                                    [top n] (when (seq tally) (last (sort-by val tally)))
+                                    majority (when (and top (> (* 2 n) (count by-w)))
+                                               (set (map key (filter #(= top (val %)) by-w))))
                                     minority? (and majority
+                                                   (contains? by-w @witness)
                                                    (not (contains? majority @witness)))]
                                 (when minority?
                                   ;; Move, and reconnect the socket, which is
