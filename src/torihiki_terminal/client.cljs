@@ -372,6 +372,60 @@
                   (set-status! false "disconnected — the numbers below are stale")
                   (js/console.error "torihiki-terminal:" e))))))
 
+;; ── woken by the chain, not by a timer ──────────────────────────────────────
+
+(defonce ^:private socket (atom {:ws nil :backoff 500 :ticking false :again false}))
+
+(defn- tick-once!
+  "Run `tick!`, and if wakeups arrive while it is running, run it once more
+  afterwards rather than once per wakeup.
+
+  Blocks land ~336 ms apart and a tick is five requests. Without this, a burst
+  after a reconnect would start five ticks at once, and the last one to return
+  would decide what the page shows — which is not necessarily the newest, so
+  the display could go backwards while every individual request succeeded."
+  []
+  (if (:ticking @socket)
+    (swap! socket assoc :again true)
+    (do (swap! socket assoc :ticking true :again false)
+        (js/Promise.resolve
+         (.finally (js/Promise.resolve (tick!))
+                   (fn []
+                     (let [again (:again @socket)]
+                       (swap! socket assoc :ticking false :again false)
+                       (when again (tick-once!)))))))))
+
+(defn- subscribe!
+  "Open the socket that says a block committed, and keep it open.
+
+  It carries a notification, not the state — the tick that follows is what
+  fetches the book, the trades and the account. That keeps one definition of
+  every endpoint instead of a second copy inside a socket frame, and what the
+  socket removes is the waiting, which is all the poll was costing.
+
+  Addressed to the SAME witness the page reads from. Woken by w2 while reading
+  w1, the page would refresh on a height it is not being served, and the two
+  would drift apart by exactly the amount that makes a spread look real when
+  it is not — the reason `witness` exists at all."
+  []
+  (let [url (str (.replace node-url #"^http" "ws") (with-w "/subscribe"))
+        ws (js/WebSocket. url)]
+    (swap! socket assoc :ws ws)
+    (.addEventListener ws "open"
+                       (fn [_] (swap! socket assoc :backoff 500)))
+    (.addEventListener ws "message" (fn [_] (tick-once!)))
+    ;; Reconnect with a backoff that gives up its patience on success rather
+    ;; than on a count: a replica being deployed is unreachable for seconds,
+    ;; and a page that retried forever at 500 ms would be a small flood aimed
+    ;; at the thing it is waiting for.
+    (.addEventListener
+     ws "close"
+     (fn [_]
+       (let [b (:backoff @socket)]
+         (swap! socket assoc :backoff (min 15000 (* 2 b)))
+         (js/setTimeout subscribe! b))))
+    (.addEventListener ws "error" (fn [_] (.close ws)))))
+
 (defn ^:export start []
   (wire-form!)
   (if-not (tkeys/supported?)
@@ -388,4 +442,18 @@
                              "Could not start a session — no key could be generated.")
                   (js/console.error "torihiki-terminal:" e)))))
   (tick!)
-  (js/setInterval tick! 1500))
+  (subscribe!)
+  ;; The floor, not the clock.
+  ;;
+  ;; This used to be 1500 and it WAS the clock: nothing else asked the chain
+  ;; anything, so the average wait between a block committing and this page
+  ;; showing it was 750 ms — the largest single term in an end-to-end of about
+  ;; 2600 ms, against blocks that land ~336 ms apart. The page was four times
+  ;; slower than the chain it was watching.
+  ;;
+  ;; `subscribe!` is the clock now. This stays, ten times slower, for the case
+  ;; the socket cannot cover: it is closed, or reconnecting, or the replica is
+  ;; running a build without `/subscribe` and answers 426. A page that went
+  ;; silent whenever the socket did would be a worse answer than a slow one,
+  ;; and the status line cannot say "disconnected" if nothing is asking.
+  (js/setInterval tick! 15000))
