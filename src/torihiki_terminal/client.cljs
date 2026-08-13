@@ -57,14 +57,38 @@
 
 (defonce session (atom {:key nil :account nil :chain-id nil :busy false}))
 
-(def ^:const witness
-  "Which replica this page reads from. They agree — the status line says so by
-  fetching all four — but a page has to read the book from ONE of them, or a
-  bid and an ask a block apart would look like a spread that is not there."
-  "w1")
+;; Declared here rather than beside `subscribe!` because `tick!` reaches for it:
+;; when the replica this page reads is outvoted, the socket has to be reopened
+;; against the replacement, and the socket is addressed to the replica.
+(defonce ^:private socket (atom {:ws nil :backoff 500 :ticking false :again false}))
+
+;; Which replica this page reads from. A page has to read the book from ONE of
+;; them, or a bid and an ask a block apart would look like a spread that is not
+;; there.
+;;
+;; ## It moved, and it used to be `w1` forever
+;;
+;; This was a constant, on the reasoning that the replicas agree and the status
+;; line proves it by fetching all four. They do agree — until one of them does
+;; not, and then the page is reading the one that does not.
+;;
+;; Measured on the deployed chain: w1 disagreed with w2, w3 and w4 in 16 of 16
+;; strict same-height comparisons, holding a resting order at a price the other
+;; three did not have. The status line said `4 replicas, agreeing` throughout,
+;; because it compares roots at equal HEIGHTS and each sample caught the
+;; replicas a block apart — the check was built for a chain that stalls, not for
+;; one that runs while one member computes a different answer.
+;;
+;; So the page picks a replica in the majority and says when it moves. This does
+;; not repair the chain; a divergent replica needs a state it can agree with,
+;; which is not something a client can hand it. What it repairs is showing
+;; somebody a book that no quorum stands behind.
+;;
+;; A comment rather than a docstring: `defonce` takes two arguments.
+(defonce witness (atom "w1"))
 
 (defn- with-w [path]
-  (str path (if (re-find #"\?" path) "&" "?") "w=" witness))
+  (str path (if (re-find #"\?" path) "&" "?") "w=" @witness))
 
 (defn- fetch-json [path]
   (-> (js/fetch (str node-url (with-w path)))
@@ -358,14 +382,41 @@
                                     by-h (group-by :height hs)
                                     split (some (fn [[_ g]]
                                                   (> (count (set (map :state-root g))) 1))
-                                                by-h)]
+                                                by-h)
+                                    ;; Who is in the majority, and is this page
+                                    ;; reading one of them?
+                                    ;;
+                                    ;; The `split` flag above is a warning and
+                                    ;; nothing more — it fires on the first
+                                    ;; height where two roots differ, which is
+                                    ;; also what a page one block behind looks
+                                    ;; like. `minority` is a claim about a
+                                    ;; NAMED replica, so it takes the height
+                                    ;; with the most witnesses at it and only
+                                    ;; speaks when there is a strict majority
+                                    ;; to be outside of.
+                                    [_ g] (last (sort-by (comp count val) by-h))
+                                    tally (frequencies (map :state-root g))
+                                    [top n] (last (sort-by val tally))
+                                    majority (when (and top (> (* 2 n) (count g)))
+                                               (set (map :witness
+                                                         (filter #(= top (:state-root %)) g))))
+                                    minority? (and majority
+                                                   (not (contains? majority @witness)))]
+                                (when minority?
+                                  ;; Move, and reconnect the socket, which is
+                                  ;; addressed to the replica being read.
+                                  (reset! witness (first (sort majority)))
+                                  (some-> (:ws @socket) (.close)))
                                 (set-status!
-                                 (not split)
+                                 (and (not split) (not minority?))
                                  (str "live · block " (:height head) " · "
                                       (count hs) " replicas, "
-                                      (if split
-                                        "DISAGREEING at one height"
-                                        "agreeing"))))))
+                                      (cond
+                                        minority? (str "READ REPLICA WAS OUTVOTED — moved to "
+                                                       @witness)
+                                        split "DISAGREEING at one height"
+                                        :else "agreeing"))))))
                      (.catch (fn [_] nil)))))
         (.catch (fn [e]
                   ;; say it, do not freeze on the last good frame
@@ -374,7 +425,6 @@
 
 ;; ── woken by the chain, not by a timer ──────────────────────────────────────
 
-(defonce ^:private socket (atom {:ws nil :backoff 500 :ticking false :again false}))
 
 (defn- tick-once!
   "Run `tick!`, and if wakeups arrive while it is running, run it once more
