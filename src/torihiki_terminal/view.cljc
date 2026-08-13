@@ -297,8 +297,33 @@
   `#tk-ticker` rather than replacing the container it is mounted in."
   [frame]
   (list
+   ;; The market picker. A select rather than tabs: the number of markets is
+   ;; not fixed — `/markets` says what is listed and a market can be listed on
+   ;; a running chain — so a control whose size is the market count would grow
+   ;; through the header the day somebody lists a third.
+   ;;
+   ;; The label was the literal string `BTC-PERP` while the chain ran two
+   ;; markets, which is the same class of error as a position panel showing
+   ;; zeros it never asked about: a plausible number nobody supplied.
+   ;; The picker is rendered FROM THE FRAME, not written into by the client.
+   ;;
+   ;; It was a fixed `<option>` that the client rewrote after each fetch, and
+   ;; that never survived: this whole body is swapped on every tick, so the
+   ;; client's options were replaced by the fixed one a moment later. The
+   ;; symptom was a picker that offered both markets, accepted a choice, and
+   ;; snapped back — a control that looks wired and is not.
+   ;;
+   ;; A select rather than tabs because the number of markets is not fixed:
+   ;; `/markets` says what is listed and a market can be listed while the page
+   ;; is open, so a control sized by the market count would grow through the
+   ;; header the day somebody lists a third.
    [:div {:class "tk-mkt"}
-    [:span {:class "hig-headline"} "BTC-PERP"]
+    [:select {:id "tk-market" :class "hig-headline tk-mkt-pick"
+              :aria-label "Market"}
+     (for [m (or (seq (:markets frame)) [{:id (:market frame 1) :symbol "…"}])]
+       [:option (cond-> {:value (str (:id m))}
+                  (= (:id m) (:market frame 1)) (assoc :selected "selected"))
+        (or (:symbol m) (str "MKT-" (:id m)))])]
     [:span {:class "hig-caption2 tk-dim"} "torihiki"]]
    [:div {:class "tk-stat"}
     [:span {:class "hig-caption2 tk-dim"} "Last"]
@@ -418,6 +443,12 @@
 .tk-live{padding-top:var(--hig-spacing-2)}
 .tk-ticker{display:flex;flex-wrap:wrap;gap:var(--hig-spacing-6);align-items:baseline;
   padding:var(--hig-spacing-4) 0}
+.tk-mkt-pick{background:transparent;border:0;color:inherit;font:inherit;
+  padding:0;cursor:pointer;-webkit-appearance:none;appearance:none;
+  /* the caret would be the only chrome in a header that has none */
+  max-width:14ch;text-overflow:ellipsis}
+.tk-mkt-pick:focus-visible{outline:2px solid var(--hig-color-accent);
+  outline-offset:2px}
 .tk-stat,.tk-mkt{display:flex;flex-direction:column;gap:var(--hig-spacing-1);min-width:0}
 .tk-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr);
   gap:var(--hig-spacing-4);align-items:start}

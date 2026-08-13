@@ -53,7 +53,7 @@
 
 (def ^:const market 1)
 
-(declare tick!)
+(declare tick! refresh-markets!)
 
 (defonce session (atom {:key nil :account nil :chain-id nil :busy false}))
 
@@ -87,11 +87,29 @@
 ;; A comment rather than a docstring: `defonce` takes two arguments.
 (defonce witness (atom "w1"))
 
+;; Which market this page is showing. The chain can list one while the page is
+;; open (`/markets` POST does exactly that), so the picker is filled from what
+;; the node reports rather than from anything compiled in here — the header
+;; said `BTC-PERP` while the chain ran two markets, which is a plausible label
+;; nobody supplied.
+(defonce market* (atom 1))
+
+;; What `/markets` last reported: `[{:id :symbol}]`. The picker is drawn from
+;; this, so it is data rather than DOM.
+(defonce listed-markets (atom []))
+
 ;; height -> {witness -> state-root}, bounded. See the comparison in `tick!`.
 (defonce ^:private seen-roots (atom {}))
 
-(defn- with-w [path]
-  (str path (if (re-find #"\?" path) "&" "?") "w=" @witness))
+(defn- with-w
+  "Add the replica and the market to a path.
+
+  Both are page state and both are per-request: the replica because a page must
+  read one replica's book (a bid and an ask a block apart look like a spread
+  that is not there), the market because every read route now answers about
+  one. `/head` and `/markets` ignore `m=` and are unharmed by carrying it."
+  [path]
+  (str path (if (re-find #"\?" path) "&" "?") "w=" @witness "&m=" @market*))
 
 (defn- fetch-json [path]
   (-> (js/fetch (str node-url (with-w path)))
@@ -139,12 +157,14 @@
   "Assemble the shape the view functions expect from what the node returns.
   The node speaks its read models; the view speaks frames. Translating in one
   place keeps both of them from knowing about the other's shape."
-  [head market* book trades acct]
+  [head mkt-info book trades acct listed]
   (let [pos (position-for acct market)]
-    {:height (:height head)
-     :last (:last market*)
-     :mark (:mark market*)
-     :oracle (:oracle market*)
+    {:market @market*
+     :markets listed
+     :height (:height head)
+     :last (:last mkt-info)
+     :mark (:mark mkt-info)
+     :oracle (:oracle mkt-info)
      :bids (:bids book)
      :asks (:asks book)
      ;; `:h` — the block, carried as the block.
@@ -165,7 +185,7 @@
                 :entry (:entry pos 0)
                 :upnl (:unrealized pos 0)}
      :equity (:equity acct 0)
-     :funding (:funding-rate market*)
+     :funding (:funding-rate mkt-info)
      :resting (:resting head)
      :root (:state-root head)}))
 
@@ -280,7 +300,7 @@
       (nil? level) (set-order-status! false "Limit price must be a whole number of ticks.")
       (nil? qty) (set-order-status! false "Size must be a whole number of lots.")
       (zero? qty) (set-order-status! false "Size must be greater than zero.")
-      :else (submit! {:tx :order :market market :side side
+      :else (submit! {:tx :order :market @market* :side side
                       :level level :qty qty :flags (flags)}))))
 
 (defn- faucet! []
@@ -331,6 +351,7 @@
 ;; ── the loop ────────────────────────────────────────────────────────────────
 
 (defn tick! []
+  (refresh-markets!)
   (let [account (:account @session)]
     (-> (js/Promise.all
          #js [(fetch-json "/head") (fetch-json "/market")
@@ -358,7 +379,7 @@
                   (.catch (fn [_] nil)))])
         (.then (fn [[head market* book trades acct candles]]
                  (swap! session assoc :chain-id (:chain-id head))
-                 (render! (assoc (frame head market* book trades acct)
+                 (render! (assoc (frame head market* book trades acct @listed-markets)
                                  :candles (when (seq (:candles candles))
                                             (:candles candles))
                                  ))
@@ -499,8 +520,55 @@
          (js/setTimeout subscribe! b))))
     (.addEventListener ws "error" (fn [_] (.close ws)))))
 
+(defn- refresh-markets!
+  "Keep the market list, and keep the selection valid.
+
+  It used to write the picker's `<option>`s into the DOM. That never survived:
+  `render!` swaps the whole ticker body on every tick, so the options were
+  replaced by the server-rendered ones a moment after being written. The view
+  renders the picker from the frame now, and this only supplies the data.
+
+  Refreshed every tick rather than once at boot, because a market can be
+  listed while the page is open — `POST /markets` does exactly that."
+  []
+  (-> (fetch-json "/markets")
+      (.then (fn [{:keys [markets]}]
+               (reset! listed-markets (mapv #(select-keys % [:id :symbol]) markets))
+               ;; A market that stopped being listed must not leave the page
+               ;; reading an id the node answers about by falling back to its
+               ;; default — that answer looks like the market the user picked
+               ;; and is not.
+               (when-not (some #{@market*} (map :id markets))
+                 (reset! market* (or (:id (first markets)) 1)))))
+      (.catch (fn [_] nil))))
+
+(defn- wire-market!
+  "Listen on the document, not on the element.
+
+  The first version attached a `change` listener to `#tk-market` at boot, and
+  it stopped working after one tick: `render!` swaps the whole ticker body,
+  which replaces the select and takes the listener with it. The symptom was a
+  picker that showed both markets, accepted a click, and went back to the
+  first one — a control that looks wired and is not.
+
+  Delegation is what `wire-form!` already does with `data-act` for the same
+  reason, and it survives every re-render because the document does."
+  []
+  (.addEventListener
+   js/document "change"
+   (fn [ev]
+     (when (= "tk-market" (some-> (.-target ev) (.-id)))
+       (let [id (js/parseInt (.. ev -target -value))]
+         (when (and id (not= id @market*))
+           (reset! market* id)
+           ;; Redraw now rather than at the next wake: switching markets is a
+           ;; deliberate act and a page that keeps showing the old book for a
+           ;; block reads as the switch having failed.
+           (tick!)))))))
+
 (defn ^:export start []
   (wire-form!)
+  (wire-market!)
   (if-not (tkeys/supported?)
     (set-text! "tk-session-note"
                "This browser has no Ed25519 in WebCrypto, so this page can read the chain but cannot sign anything for it.")
