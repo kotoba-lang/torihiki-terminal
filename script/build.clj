@@ -11,7 +11,7 @@
   exists to prevent."
   (:require [clojure.java.io :as io]
             [clojure.set]
-            [clojure.string]
+            [kotoba.lang.text]
             [torihiki-terminal.view :as view]))
 
 (def zero-frame
@@ -37,7 +37,7 @@
   assertion exists to make the next occurrence loud, and `verify.cljs` exists
   because an assertion about the HTML still cannot tell you the page WORKS."
   [html]
-  (when-not (clojure.string/includes? html bundle)
+  (when-not (kotoba.lang.text/includes? html bundle)
     (throw (ex-info (str "build: the document does not reference " bundle
                          " — it would render as a static picture of a live page")
                     {:bundle bundle})))
@@ -74,7 +74,7 @@
         dead (sort (remove known-undefined-tokens (clojure.set/difference used defined)))]
     (when (seq dead)
       (throw (ex-info (str "build: the document reads design tokens nothing defines: "
-                           (clojure.string/join ", " dead)
+                           (kotoba.lang.text/join ", " dead)
                            " — an undefined custom property invalidates the whole "
                            "declaration, so this would ship as a silent style loss")
                       {:tokens dead})))))
