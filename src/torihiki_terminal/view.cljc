@@ -14,7 +14,7 @@
   io.github.kotoba-lang/kotoba-ui not found: .../appkit/kotoba-ui`). The repo
   already carries a `:local` alias holding exactly that override, which is
   where a sibling path belongs. Filed rather than worked around silently."
-  (:require [clojure.string :as str]
+  (:require [kotoba.lang.text :as str]
             [kotoba-ui.core :as ui]
             [torihiki-chart.candle :as tc]
             [torihiki-chart.depth :as td]
