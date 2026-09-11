@@ -37,8 +37,8 @@ Two things changed so it cannot happen quietly again:
   page that always renders.
 
   ```
-  NODE_PATH=<root>/node_modules nbb script/verify.cljk
-  TK_BASE=http://127.0.0.1:8899 nbb script/verify.cljk
+  NODE_PATH=<root>/node_modules kbb --backend sci script/verify.cljk
+  TK_BASE=http://127.0.0.1:8899 kbb --backend sci script/verify.cljk
   ```
 
   Against production: `live · block 35`, faucet accepted at 36, chip toggled,
@@ -78,8 +78,8 @@ worse than one that admits it is disconnected: the first invites a trade.
 
 ```bash
 npm install
-npx shadow-cljs release client   # browser bundle -> public/js/app.js
-clojure -M:build                 # shell         -> public/index.html
+amu compile --target wasm32-browser client   # browser bundle -> public/js/app.js
+kbb -M:build                 # shell         -> public/index.html
 npx wrangler pages deploy public --project-name torihiki
 ```
 

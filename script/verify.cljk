@@ -3,8 +3,8 @@
 
   Run against a deployment:
 
-      nbb script/verify.cljk                      # https://torihiki.pages.dev
-      TK_BASE=http://127.0.0.1:8899 nbb script/verify.cljk
+      kbb --backend sci script/verify.cljk                      # https://torihiki.pages.dev
+      TK_BASE=http://127.0.0.1:8899 kbb --backend sci script/verify.cljk
 
   Playwright resolves from the superproject root, so run it from there or with
   NODE_PATH set. Wrap it in scripts/resource-guard.mjs like any other build.

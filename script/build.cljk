@@ -1,5 +1,5 @@
 (ns build
-  "Render the terminal shell. Run: clojure -M:build
+  "Render the terminal shell. Run: kbb -M:build
 
   There is no session to generate any more. The page used to embed a recorded
   run of the engine and replay it in the browser; it now reads a live node, so
@@ -42,7 +42,7 @@
                          " — it would render as a static picture of a live page")
                     {:bundle bundle})))
   (when-not (.exists (io/file (str "public" bundle)))
-    (throw (ex-info (str "build: " bundle " has not been compiled — run shadow-cljs release client")
+    (throw (ex-info (str "build: " bundle " has not been compiled — run amu compile --target wasm32-browser client")
                     {:bundle bundle}))))
 
 (def ^:private known-undefined-tokens

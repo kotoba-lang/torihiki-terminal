@@ -13,8 +13,8 @@
   times, and that no colour was baked as a hex (which would stop it following
   the theme).
 
-      NODE_PATH=<root>/node_modules nbb script/verify_chart.cljk
-      TK_BASE=https://<preview>.torihiki.pages.dev nbb script/verify_chart.cljk
+      NODE_PATH=<root>/node_modules kbb --backend sci script/verify_chart.cljk
+      TK_BASE=https://<preview>.torihiki.pages.dev kbb --backend sci script/verify_chart.cljk
 
   Same nbb-safe playwright subset as `verify.cljs`: goto, waitForTimeout, and
   `.evaluate` with a plain expression."
