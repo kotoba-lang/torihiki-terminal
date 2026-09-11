@@ -12,7 +12,7 @@
   clearinghouse will not match an account against itself.
 
       TK_BASE=https://<preview>.torihiki.pages.dev NODE_PATH=<root>/node_modules \\
-        nbb script/make_fills.cljs"
+        nbb script/make_fills.cljk"
   (:require ["playwright" :as pw]))
 
 (def chromium (or (.-chromium pw) (some-> (.-default pw) (.-chromium))))

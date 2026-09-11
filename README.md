@@ -27,18 +27,18 @@ the difference is visible.
 
 Two things changed so it cannot happen quietly again:
 
-- **`script/build.clj` refuses to write a document that does not reference the
+- **`script/build.cljk` refuses to write a document that does not reference the
   bundle**, or when the bundle has not been compiled. That would have caught
   this exact bug.
-- **`script/verify.cljs` clicks the deployed page** — waits for the session
+- **`script/verify.cljk` clicks the deployed page** — waits for the session
   panel to fill, clicks the faucet, types a price and size, toggles a chip,
   clicks Buy, and asserts the chain moved. It exits non-zero when it does not,
   because a verification that always passes is the same kind of object as a
   page that always renders.
 
   ```
-  NODE_PATH=<root>/node_modules nbb script/verify.cljs
-  TK_BASE=http://127.0.0.1:8899 nbb script/verify.cljs
+  NODE_PATH=<root>/node_modules nbb script/verify.cljk
+  TK_BASE=http://127.0.0.1:8899 nbb script/verify.cljk
   ```
 
   Against production: `live · block 35`, faucet accepted at 36, chip toggled,
@@ -60,7 +60,7 @@ votes. The node says so in its own `/head` response and the page repeats it.
 ## The browser renders with the same functions the server does
 
 `order-book`, `trades-panel`, `chain-panel` and `ticker-body` are pure hiccup
-functions. `script/build.clj` calls them to render the shell; the client calls
+functions. `script/build.cljk` calls them to render the shell; the client calls
 the same ones and swaps the result in with `kotoba-ui.core/->html`.
 
 That replaced ~90 lines of hand-written JavaScript which built the same rows
