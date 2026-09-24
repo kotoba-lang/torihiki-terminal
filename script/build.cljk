@@ -10,7 +10,7 @@
   is as old as the last deploy, which is the failure mode the status line
   exists to prevent."
   (:require [clojure.java.io :as io]
-            [clojure.set]
+            [kotoba.lang.coll]
             [kotoba.lang.text]
             [torihiki-terminal.view :as view]))
 
@@ -71,7 +71,7 @@
   [html]
   (let [used (set (map second (re-seq #"var\((--hig-[a-z0-9-]+)\)" html)))
         defined (set (map second (re-seq #"(--hig-[a-z0-9-]+)\s*:" html)))
-        dead (sort (remove known-undefined-tokens (clojure.set/difference used defined)))]
+        dead (sort (remove known-undefined-tokens (kotoba.lang.coll/difference used defined)))]
     (when (seq dead)
       (throw (ex-info (str "build: the document reads design tokens nothing defines: "
                            (kotoba.lang.text/join ", " dead)
