@@ -9,7 +9,7 @@
   time. Baking a snapshot in would put a number on the page that looks live and
   is as old as the last deploy, which is the failure mode the status line
   exists to prevent."
-  (:require [clojure.java.io :as io]
+  (:require [kotoba.io :as io]
             [kotoba.lang.coll]
             [kotoba.lang.text]
             [torihiki-terminal.view :as view]))
@@ -41,7 +41,7 @@
     (throw (ex-info (str "build: the document does not reference " bundle
                          " — it would render as a static picture of a live page")
                     {:bundle bundle})))
-  (when-not (.exists (io/file (str "public" bundle)))
+  (when-not (io/exists? (io/file (str "public" bundle)))
     (throw (ex-info (str "build: " bundle " has not been compiled — run amu compile --target wasm32-browser client")
                     {:bundle bundle}))))
 
