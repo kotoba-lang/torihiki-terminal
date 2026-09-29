@@ -5,7 +5,7 @@
  :this-repo
  {:name "torihiki-terminal"
   ;; Role suffix rather than a prefix: the short name `torihiki` is taken by
-  ;; the engine, and CLAUDE.md's naming rule says to add a role
+  ;; the engine, and AGENTS.md's naming rule says to add a role
   ;; (cf. kami-engine-guest) rather than a language or a generic word.
   :prefix nil
   :role :application
