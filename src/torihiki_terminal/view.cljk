@@ -265,11 +265,37 @@
            (signed-usd upnl)]]])]
      {:class "tk-positions"})))
 
+(def roadmap-url
+  "https://github.com/kotoba-lang/torihiki/blob/main/docs/decentralization-roadmap.md")
+
+(defn path-label
+  "What the node this page reads says it is, in one line.
+
+  Taken from the node's own `/head`, never assumed from which URL was
+  configured: this panel read \"sequencer\" as a constant while the page was
+  pointed at the validators, and the constant was the only thing on the
+  screen answering the question. `:decentralization` is the current field
+  (torihiki-node.claims); `:consensus` is what a sequencer older than it
+  says; a validator older than both says neither, but it names a witness."
+  [head]
+  (or (get-in head [:decentralization :summary])
+      (when-let [c (:consensus head)] (str "devnet, single operator — " c))
+      (when (:witness head)
+        "devnet, single operator — BFT validator set whose keys one party holds")
+      "unknown — the node does not say what it is"))
+
+(defn stalled?
+  "True when the height has not moved for `threshold-ms`. A chain that stopped
+  answers `/head` exactly as a live one does, with an old height in it, and a
+  status line reading \"live\" over it invites a trade nothing will execute."
+  [{:keys [height at]} now-ms threshold-ms]
+  (boolean (and height at (>= (- now-ms at) threshold-ms))))
+
 (defn chain-panel [frame meta*]
   (ui/panel
    [[:div {:class "tk-panel-head"}
      [:span {:class "hig-headline"} "Chain"]
-     [:span {:class "hig-caption2 tk-dim"} "sequencer"]]
+     [:span {:id "tk-path" :class "hig-caption2 tk-dim"} "asking the node what it is…"]]
     [:div {:class "tk-kv hig-footnote"}
      [:span "Block"] [:span {:id "tk-height" :class "tk-px"} (:height frame)]]
     [:div {:class "tk-kv hig-footnote"}
@@ -287,7 +313,7 @@
      "state root " [:code {:id "tk-root"} (subs (:root frame) 0 32)]]
     [:p {:class "hig-caption2 tk-dim"}
      "SHA-256 over a canonical encoding of the live state. A validator replays "
-     "the block and recomputes this; if it differs, the sequencer lied."]]
+     "the block and recomputes this; if it differs, whoever produced it lied."]]
    {:class "tk-chain"}))
 
 ;; ── the page ────────────────────────────────────────────────────────────────
@@ -373,12 +399,16 @@
        "it produces them: prices are integer ticks, matching is price-time "
        "priority, and the roots are SHA-256 over a canonical encoding."]
       [:p {:class "hig-body"}
-       [:strong "It is a sequencer, not a chain."]
-       " One writer decides the order of transactions; nothing votes and "
-       "nothing tolerates a Byzantine peer. The node says so in its own "
-       [:code "/head"] " response. What the sequencer cannot do is lie "
-       "undetectably — every block it produces can be replayed against the "
-       "same engine and its state root contradicted."]
+       [:strong "It is a devnet run by one operator, not a decentralized exchange."]
+       " The page reads a four-replica BFT validator set, and all four keys are "
+       "held by the same party, so a quorum of them is one party's word. "
+       "Collateral is a faucet grant and nothing can be withdrawn to another "
+       "chain. The node says which of these it is in its own "
+       [:code "/head"] " response, and the Chain panel shows that answer. What "
+       "it cannot do is lie undetectably — every block can be replayed against "
+       "the same engine and its state root contradicted. What has to happen "
+       "before any of this changes is in the "
+       [:a {:href roadmap-url} "decentralization roadmap"] "."]
       [:p {:class "hig-body"}
        "This page renders with the same pure functions that render it on the "
        "server, so the browser and the node never disagree about what a row "
@@ -401,9 +431,11 @@
                    "ops/sec on two runs of a loaded machine. Until it is "
                    "measured somewhere quiet, the claim is withdrawn rather "
                    "than restated with a smaller number."]])
-       (ui/panel [[:h3 {:class "hig-headline"} "Sequencer, not consensus"]
+       (ui/panel [[:h3 {:class "hig-headline"} "One operator, not consensus"]
                   [:p {:class "hig-footnote tk-dim"}
-                   "One writer decides the order. Nothing votes. The log is "
+                   "Four replicas vote, and one party holds all four keys. "
+                   "Every decentralization flag the node serves is false "
+                   "until its gate passes in production. The log is "
                    "checkable by replay, which is a different guarantee from "
                    "tamper-evidence and the stronger one."]])
        (ui/panel [[:h3 {:class "hig-headline"} "Signed, replay-proof"]
