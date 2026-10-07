@@ -17,10 +17,15 @@
 
   `torihiki-node` is one Durable Object deciding the order by itself and
   saying so at `/head`. `torihiki-validator` is four of them running
-  `engi.replica` with the same engine as their state machine. The terminal
+  `inga.replica` with the same engine as their state machine. The terminal
   pointed at the first one for as long as the second one did not work; two
   chains where there should be one is a question about which is real, and the
-  answer should not be whichever the page happens to fetch."
-  "https://torihiki-validator.04-feasts-minded.workers.dev")
+  answer should not be whichever the page happens to fetch.
+
+  v3, because it is the set that still answers: `torihiki-validator` (v1)
+  returns Cloudflare error 1042 as of 2026-10-07, so a page pointed at it
+  showed `disconnected` and nothing else. v3 answers and is stalled at height
+  5805 — which the status line now says, rather than `live`."
+  "https://torihiki-validator-v3.04-feasts-minded.workers.dev")
 
 (def witnesses ["w1" "w2" "w3" "w4"])
