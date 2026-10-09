@@ -19,17 +19,13 @@
 
   Local by default, the layout `torihiki-node/deploy` and its scripts use. A
   deployment renders its own list into `data-nodes` (`TK_NODES` at build
-  time); nothing here names a vendor or a hosted endpoint."
+  time, see `torihiki-terminal.deploy`); nothing here names a vendor or a
+  hosted endpoint."
   ["http://127.0.0.1:8801" "http://127.0.0.1:8802" "http://127.0.0.1:8803" "http://127.0.0.1:8804"])
 
 (def witnesses ["w1" "w2" "w3" "w4"])
 
-(def validator-set
-  "The set a page checks signed roots against, as `w1=<base64 spki>,...`, with
-  the engine epoch it belongs to. Empty: the page takes the set most of its
-  nodes report and says so. A deployment that knows its set renders it here
-  (`TK_SET`, `TK_EPOCH` at build time)."
-  "")
-
-(def validator-epoch 0)
-
+;; No validator set here: one in source would ship in every build, including
+;; builds for chains it is not the set of. A deployment pins its set with
+;; TK_SET/TK_EPOCH/TK_CHAIN (`torihiki-terminal.deploy`), and without one the
+;; page says its balance is NOT a proof.

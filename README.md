@@ -77,11 +77,52 @@ worse than one that admits it is disconnected: the first invites a trade.
 ## Build
 
 ```bash
-npm install
-amu compile --target wasm32-browser client   # browser bundle -> public/js/app.js
+script/build_js.sh           # browser bundle -> public/js/app.js
 kbb -M:build                 # shell         -> public/index.html
-npx wrangler pages deploy public --project-name torihiki
 ```
+
+`public/` is static files; serve it from any host.
+
+### What a deployment pins (`TK_*`)
+
+The shell build reads the deployment's trust root from the environment and
+renders it into the page (`torihiki-terminal.deploy`):
+
+| env | |
+|---|---|
+| `TK_NODES` | `https://n1.example,https://n2.example:8443,...` — the standalone nodes the page reads and compares. Default: four local nodes. |
+| `TK_SET` | `w1=<base64 spki>,w2=...` — the validator set. A balance shows as **proved** only when more than 2/3 of it signed the root. |
+| `TK_EPOCH` | the engine epoch of that set (required with `TK_SET`) |
+| `TK_CHAIN` | the chain id that set signs for (required with `TK_SET`); the page signs and verifies for this chain only, whatever the nodes report |
+
+```bash
+N=https://n1.example
+D="$(curl -s $N/duties)"   # keys and epoch from ONE answer, so they agree
+TK_NODES=$N,https://n2.example,https://n3.example,https://n4.example \
+TK_SET="$(jq -r '.["segment-keys"] | to_entries | map("\(.key)=\(.value)") | join(",")' <<<"$D")" \
+TK_EPOCH="$(jq -r .epoch <<<"$D")" \
+TK_CHAIN="$(curl -s $N/attestation | jq -r .chain)" \
+kbb -M:build
+```
+
+(Taking the set from a node, as above, is only as good as that node: check it
+against what the operators publish before shipping the page.)
+
+The pinned set is for ONE epoch. After the chain turns the set, the page says
+"not verified" until it is rebuilt with the new set — it fails closed, not open.
+
+The build **fails** — and says every reason — on a URL that is not a plain
+base URL, plain `http://` to a non-local host (`TK_ALLOW_HTTP=1`), a key that
+is not Ed25519 SPKI, a duplicate witness or key, a non-canonical spelling of
+a key (one key spelled twice would count twice), a key of small order (anybody
+can sign for it), fewer than 4 validators (`TK_ALLOW_SMALL_SET=1`), a set
+without its epoch or chain, or keys a devnet derives — under the pinned chain
+or a default devnet chain, for any devnet name — which anybody can sign with
+(`TK_ALLOW_DEVNET=1`). Without `TK_SET` the page still works and says
+its balance is NOT a proof.
+
+`?nodes=a,b` on the page URL still overrides the node list; it cannot
+override the set or the chain.
 
 ## Design system
 

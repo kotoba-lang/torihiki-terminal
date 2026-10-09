@@ -102,6 +102,17 @@
 
 (defonce session (atom {:key nil :account nil :chain-id nil :busy false}))
 
+(def pinned-set?
+  "Did the build pin a validator set (`data-set`)?"
+  (boolean (some-> (.getElementById js/document "tk-root") (.getAttribute "data-set") not-empty)))
+
+(def pinned-chain
+  "The chain id the build pinned with the validator set (`data-chain`), or
+  nil. When there is one, the page signs and verifies for that chain only,
+  whatever the nodes say theirs is. A set pinned WITHOUT a chain is a broken
+  page, and it fails closed: nothing is proved and nothing is signed."
+  (some-> (.getElementById js/document "tk-root") (.getAttribute "data-chain") not-empty))
+
 ;; Declared here rather than beside `subscribe!` because `tick!` reaches for it:
 ;; when the replica this page reads is outvoted, the socket has to be reopened
 ;; against the replacement, and the socket is addressed to the replica.
@@ -280,6 +291,15 @@
 
       (or (nil? key) (nil? account) (nil? chain-id))
       (do (set-order-status! false "Still starting up — no session key yet.")
+          (js/Promise.resolve nil))
+
+      (and pinned-set? (nil? pinned-chain))
+      (do (set-order-status! false "This page pins a validator set but no chain id; it was built wrong. Nothing is signed.")
+          (js/Promise.resolve nil))
+
+      (and pinned-chain (not= pinned-chain chain-id))
+      (do (set-order-status! false (str "These nodes run chain " chain-id ", not " pinned-chain
+                                        " that this page was built for. Nothing is signed for it."))
           (js/Promise.resolve nil))
 
       busy
@@ -611,6 +631,7 @@
         attr (some-> root (.getAttribute "data-set"))]
     (if (seq attr)
       {:held true
+       :chain pinned-chain
        :epoch (js/parseInt (or (.getAttribute root "data-epoch") "0") 10)
        :members (into {} (for [p (.split attr ",") :let [[w k] (.split p "=" 2)]] [w {:pubkey k :weight 1}]))}
       (some (fn [[t n]] (when (> (* 2 n) (count nodes)) (assoc t :held false)))
@@ -658,7 +679,8 @@
       (-> (js/Promise.all (clj->js (map #(get-json (str % "/duties")) nodes)))
           (.then
            (fn [duties]
-             (if-let [{:keys [members epoch held]} (trusted-set (array-seq duties))]
+             (if-let [{:keys [members epoch held] :as t} (when-not (and pinned-set? (nil? pinned-chain))
+                                                             (trusted-set (array-seq duties)))]
                (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation")) nodes)))
                    (.then
                     (fn [latest]
@@ -668,7 +690,10 @@
                         (letfn [(try-h [hs]
                                   (if (empty? hs)
                                     (js/Promise.resolve nil)
-                                    (-> (attested-at (first hs) members epoch chain)
+                                    ;; A pinned set signs for its pinned chain; the
+                                    ;; nodes' word for the chain id would let them
+                                    ;; replay what the same keys signed elsewhere.
+                                    (-> (attested-at (first hs) members epoch (if held (:chain t) chain))
                                         (.then (fn [r] (if r r (try-h (rest hs))))))))]
                           (try-h hs)))))
                    (.then
