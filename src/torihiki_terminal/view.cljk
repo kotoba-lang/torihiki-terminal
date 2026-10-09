@@ -235,15 +235,18 @@
       [:span "Free"] [:span {:id "tk-free" :class "tk-px"} "—"]]
      [:div {:class "tk-kv hig-footnote"}
       [:span "Next nonce"] [:span {:id "tk-nonce" :class "tk-px"} "—"]]
-     (ui/button "Request 100,000 test USD" {:act :faucet :class "tk-faucet"})
+     ;; The balance proved, not reported: a root more than 2/3 of the set
+     ;; signed, and this account's own leaf under it (`torihiki.light`).
+     [:div {:class "tk-kv hig-footnote"}
+      [:span "Proved"] [:span {:id "tk-verified" :class "tk-px"} "checking…"]]
+     (ui/button "Deposit 100,000 test USD" {:act :faucet :class "tk-faucet"})
      [:p {:id "tk-session-note" :class "hig-caption2 tk-dim"}
       "Session key generated in this browser and kept in local storage. Not a
        wallet: it holds nothing outside this devnet, and clearing site data
-       destroys it. Collateral is issued by the chain's bridge authority, which
-       signs every deposit and grants once per account — the key is the node's
-       and never reaches this browser. It backs nothing outside this devnet:
-       the certificate says who issued the collateral, not that anything was
-       deposited for it."])]
+       destroys it. On a devnet without a bridge, a deposit is this key
+       crediting itself, and the node says so (`/head` :collateral is
+       \"unbacked\"). A chain in bridge mode refuses it: collateral there comes
+       only from the bridge contract."])]
    {:class "tk-session"}))
 
 (defn positions-panel [frame]
@@ -377,7 +380,9 @@
                 (order-entry)
                 [:div {:id "tk-positions-panel"} (positions-panel f)]]
       :id "tk-root"
-      :attrs {:data-node cfg/node-url}}
+      :attrs (cond-> {:data-nodes (str/join "," cfg/node-urls)}
+               (seq cfg/validator-set) (assoc :data-set cfg/validator-set
+                                              :data-epoch (str cfg/validator-epoch)))}
      [:div {:class "tk-live"}
       [:span {:id "tk-status" :class "hig-caption2 tk-dim"} "connecting to the node…"]]
      (ticker f)
@@ -393,11 +398,13 @@
        "Every number on this page comes from "
        [:a {:href "https://github.com/kotoba-lang/torihiki"} "torihiki"]
        ", an open reimplementation of the exchange state machine that "
-       "Hyperliquid keeps closed, running live in a "
-       [:a {:href "https://github.com/kotoba-lang/torihiki-node"} "Cloudflare Worker"]
-       ". The book, the fills and the state roots are read from that node as "
-       "it produces them: prices are integer ticks, matching is price-time "
-       "priority, and the roots are SHA-256 over a canonical encoding."]
+       "Hyperliquid keeps closed, running on "
+       [:a {:href "https://github.com/kotoba-lang/torihiki-node"} "ordinary torihiki nodes"]
+       " — plain processes on any host. The page reads several of them, compares "
+       "what they say, and proves this session's balance against a state root "
+       "more than two thirds of the validator set signed: prices are integer "
+       "ticks, matching is price-time priority, and the roots are SHA-256 over a "
+       "canonical encoding."]
       [:p {:class "hig-body"}
        [:strong "It is a devnet run by one operator, not a decentralized exchange."]
        " The page reads a four-replica BFT validator set, and all four keys are "

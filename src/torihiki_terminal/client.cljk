@@ -41,22 +41,36 @@
   applies to a refused transaction — the chain gives a reason, so the form
   shows the reason."
   (:require [kotoba-ui.core :as ui]
+            [torihiki.light :as light]
             [torihiki-terminal.config :as cfg]
             [torihiki-terminal.keys :as tkeys]
             [torihiki-terminal.view :as view]))
 
-(def node-url
-  "Read from a data attribute the server rendered, so the endpoint is
-  configuration rather than something compiled into the bundle.
+(def nodes
+  "The nodes this page reads, as base URLs: `?nodes=a,b,c` on the page URL,
+  else the `data-nodes` attribute the server rendered, else `config/node-urls`.
 
-  The fallback is `config/node-url`, the same validator set the server
-  renders. It used to be the single sequencer, so a page served without the
-  attribute traded on a different chain from the one it described, and
-  nothing on the screen said so. Which path the page is on is now read from
-  the node's own `/head` and shown in the Chain panel and the status line."
-  (or (some-> (.getElementById js/document "tk-root")
-              (.getAttribute "data-node"))
-      cfg/node-url))
+  Several, on purpose, and any host: each is an ordinary torihiki node
+  (`torihiki-node`'s standalone implementation, plain HTTP), and the page
+  compares what they say rather than believing one. It used to be one URL on
+  one vendor's platform, with replicas addressed by a `?w=` parameter only
+  that platform's router understood."
+  (vec (remove empty?
+               (map #(.replace % #"/+$" "")
+                    (.split (or (some-> (js/URLSearchParams. (.. js/window -location -search)) (.get "nodes"))
+                                (some-> (.getElementById js/document "tk-root") (.getAttribute "data-nodes"))
+                                (.join (clj->js cfg/node-urls) ","))
+                            ",")))))
+
+;; Which node serves each witness, learned from their own `/head`.
+(defonce node-of (atom {}))
+
+(declare witness)
+
+(defn- base
+  "The node the page reads from: the one serving `witness`, or the first."
+  []
+  (or (get @node-of @witness) (first nodes)))
 
 (def ^:private stall-ms
   "How long the height may stand still before the status line stops saying
@@ -139,15 +153,15 @@
   that is not there), the market because every read route now answers about
   one. `/head` and `/markets` ignore `m=` and are unharmed by carrying it."
   [path]
-  (str path (if (re-find #"\?" path) "&" "?") "w=" @witness "&m=" @market*))
+  (str path (if (re-find #"\?" path) "&" "?") "m=" @market*))
 
 (defn- fetch-json [path]
-  (-> (js/fetch (str node-url (with-w path)))
+  (-> (js/fetch (str (base) (with-w path)))
       (.then #(.json %))
       (.then #(js->clj % :keywordize-keys true))))
 
 (defn- post-json [path body]
-  (-> (js/fetch (str node-url (with-w path))
+  (-> (js/fetch (str (base) (with-w path))
                 #js {:method "POST"
                      :headers #js {"content-type" "application/json"}
                      :body (js/JSON.stringify (clj->js body))})
@@ -334,28 +348,14 @@
                       :level level :qty qty :flags (flags)}))))
 
 (defn- faucet! []
-  ;; ASKS the bridge; it no longer mints.
+  ;; A deposit signed by this session's own key.
   ;;
-  ;; This used to sign a deposit crediting itself, which is what a deposit is
-  ;; on a chain with no issuer — and that chain had none, so every balance on
-  ;; it was conjured by whoever wanted one. The chain now names a bridge
-  ;; authority, `torihiki.api` refuses a deposit from anybody else, and the
-  ;; browser does not hold that key and must not: a faucet whose key reaches
-  ;; the client is not an issuer, it is a formality.
-  ;;
-  ;; So the node signs, and what comes back is a queued transaction like any
-  ;; other. Nothing is credited here.
-  (-> (post-json "/faucet" {:account (:account @session)})
-      (.then (fn [j]
-               (set-order-status!
-                (true? (:ok j))
-                (case (:reason j)
-                  "already-funded" "The bridge grants once per account — you already have collateral."
-                  "bad-account" "No session account yet."
-                  (if (:ok j)
-                    "The bridge signed a deposit — a block will carry it"
-                    (str "Faucet refused: " (or (:reason j) "unknown")))))))
-      (.catch (fn [e] (set-order-status! false (str "Faucet unreachable: " e))))))
+  ;; On a devnet with no bridge, that is what a deposit IS, and the chain says
+  ;; so: `/head`'s `:collateral` reads "unbacked". It used to ask the node to
+  ;; sign as a bridge authority, which only the Cloudflare deployment had; an
+  ;; ordinary node holds no such key, and a chain in bridge mode refuses this
+  ;; deposit outright — collateral there comes only from the bridge contract.
+  (submit! {:tx :deposit :amount 10000000}))
 
 (defn- toggle-chip! [^js e]
   (let [on? (= "1" (.. e -dataset -tkOn))]
@@ -423,11 +423,12 @@
                    ;; the screen is the property that matters, or its absence.
                    (-> (js/Promise.all
                         (clj->js (map (fn [w]
-                                        (-> (js/fetch (str node-url "/head?w=" w))
+                                        (-> (js/fetch (str w "/head"))
                                             (.then #(.json %))
                                             (.then #(js->clj % :keywordize-keys true))
+                                            (.then (fn [h] (when (:witness h) (swap! node-of assoc (:witness h) w)) h))
                                             (.catch (fn [_] nil))))
-                                      ["w1" "w2" "w3" "w4"])))
+                                      nodes)))
                        (.then (fn [hs]
                                 ;; Compared at the SAME height. Replicas are
                                 ;; legitimately a block or two apart at any
@@ -523,35 +524,11 @@
                        (when again (tick-once!)))))))))
 
 (defn- subscribe!
-  "Open the socket that says a block committed, and keep it open.
-
-  It carries a notification, not the state — the tick that follows is what
-  fetches the book, the trades and the account. That keeps one definition of
-  every endpoint instead of a second copy inside a socket frame, and what the
-  socket removes is the waiting, which is all the poll was costing.
-
-  Addressed to the SAME witness the page reads from. Woken by w2 while reading
-  w1, the page would refresh on a height it is not being served, and the two
-  would drift apart by exactly the amount that makes a spread look real when
-  it is not — the reason `witness` exists at all."
+  "Refresh once a second. A node announces nothing: it answers when asked, the
+  same to a page as to anybody, and `tick-once!` keeps overlapping refreshes
+  from showing an older answer after a newer one."
   []
-  (let [url (str (.replace node-url #"^http" "ws") (with-w "/subscribe"))
-        ws (js/WebSocket. url)]
-    (swap! socket assoc :ws ws)
-    (.addEventListener ws "open"
-                       (fn [_] (swap! socket assoc :backoff 500)))
-    (.addEventListener ws "message" (fn [_] (tick-once!)))
-    ;; Reconnect with a backoff that gives up its patience on success rather
-    ;; than on a count: a replica being deployed is unreachable for seconds,
-    ;; and a page that retried forever at 500 ms would be a small flood aimed
-    ;; at the thing it is waiting for.
-    (.addEventListener
-     ws "close"
-     (fn [_]
-       (let [b (:backoff @socket)]
-         (swap! socket assoc :backoff (min 15000 (* 2 b)))
-         (js/setTimeout subscribe! b))))
-    (.addEventListener ws "error" (fn [_] (.close ws)))))
+  (js/setInterval tick-once! 1000))
 
 (defn- refresh-markets!
   "Keep the market list, and keep the selection valid.
@@ -599,6 +576,88 @@
            ;; block reads as the switch having failed.
            (tick!)))))))
 
+(defn- b64->u8 [s] (js/Uint8Array.from (js/atob s) (fn [c] (.charCodeAt c 0))))
+
+(defn- ed25519-verify
+  "Does `sig` verify as `pubkey`'s over `payload`? WebCrypto, so a Promise."
+  [pubkey payload sig]
+  (-> (js/crypto.subtle.importKey "spki" (b64->u8 pubkey) #js {:name "Ed25519"} false #js ["verify"])
+      (.then (fn [k] (js/crypto.subtle.verify #js {:name "Ed25519"} k (b64->u8 sig)
+                                              (.encode (js/TextEncoder.) payload))))
+      (.catch (fn [_] false))))
+
+(defn- get-json [url]
+  (-> (js/fetch url) (.then #(when (.-ok %) (.json %)))
+      (.then #(some-> % (js->clj :keywordize-keys true))) (.catch (fn [_] nil))))
+
+(defn- trusted-set
+  "The validator set this page checks roots against: `data-set` (w=key,...)
+  with `data-epoch` when the server rendered them, else the set most nodes
+  report. The second is weaker — it trusts the majority of the URLs the page
+  was given — and the panel says which one it used."
+  [duties]
+  (let [root (.getElementById js/document "tk-root")
+        attr (some-> root (.getAttribute "data-set"))]
+    (if (seq attr)
+      {:held true
+       :epoch (js/parseInt (or (.getAttribute root "data-epoch") "0") 10)
+       :members (into {} (for [p (.split attr ",") :let [[w k] (.split p "=" 2)]] [w {:pubkey k :weight 1}]))}
+      (some (fn [[t n]] (when (> (* 2 n) (count nodes)) (assoc t :held false)))
+            (frequencies (keep #(when (:segment-keys %)
+                                  {:epoch (:epoch %)
+                                   :members (into {} (for [[w k] (:segment-keys %)] [(name w) {:pubkey k :weight 1}]))})
+                               duties))))))
+
+(defn- verify-balance!
+  "Prove this session's collateral against a root more than 2/3 of the set
+  signed (`torihiki.light`), and say so on the panel. No node is believed:
+  the signatures are checked here, and the balance is the account's own
+  merkle-sum leaf under that root."
+  []
+  (when-let [acct (:account @session)]
+    (-> (js/Promise.all (clj->js (map #(get-json (str % "/duties")) nodes)))
+        (.then
+         (fn [duties]
+           (if-let [{:keys [members epoch held]} (trusted-set (array-seq duties))]
+             (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation")) nodes)))
+                 (.then
+                  (fn [latest]
+                    (let [h (apply max 0 (keep :height (array-seq latest)))]
+                      (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation?h=" h)) nodes)))
+                          (.then
+                           (fn [as]
+                             (let [as (vec (remove nil? (array-seq as)))]
+                               (-> (js/Promise.all
+                                    (clj->js (for [a as :let [m (get members (:witness a))]]
+                                               (if (and m (:sig a))
+                                                 (ed25519-verify (:pubkey m) (light/root-payload (:chain-id @session) epoch (:height a) (:root a)) (:sig a))
+                                                 (js/Promise.resolve false)))))
+                                   (.then
+                                    (fn [oks]
+                                      (let [good (set (keep (fn [[a ok]] (when ok [(:witness a) (:sig a)]))
+                                                            (map vector as (array-seq oks))))
+                                            found (light/attested-root as members (:chain-id @session) epoch
+                                                                       (fn [_ _ sig] (some #(= sig (second %)) good)))]
+                                        (cond
+                                          (:conflict found) (set-text! "tk-verified" "CONFLICTING ROOTS signed by the set — do not trust this chain")
+                                          (nil? found) (set-text! "tk-verified" "not verified — no root signed by more than 2/3 of the set")
+                                          :else
+                                          ;; From every node, the first that checks: the
+                                          ;; node this page reads may not have reached
+                                          ;; the newest attested height yet (it answers
+                                          ;; 404), and any of them may lie.
+                                          (-> (js/Promise.all (clj->js (map #(get-json (str % "/proof?a=" acct "&h=" (:height found))) nodes)))
+                                              (.then (fn [ps]
+                                                       (if-let [ok (some #(light/verify-account % found acct) (remove nil? (array-seq ps)))]
+                                                         (set-text! "tk-verified"
+                                                                    (str "$" (view/usd (quot (:collateral ok) 10))
+                                                                         " proved at height " (:height ok) ", root signed by "
+                                                                         (count (:signers ok)) "/" (count members)
+                                                                         (if held "" " (set as the nodes report it)")))
+                                                         (set-text! "tk-verified" "not verified — no proof checks against the signed root"))))))))))))))))))
+             (set-text! "tk-verified" "not verified — no validator set to check against"))))
+        (.catch (fn [_] (set-text! "tk-verified" "not verified — nodes unreachable"))))))
+
 (defn ^:export start []
   (wire-form!)
   (wire-market!)
@@ -630,4 +689,6 @@
   ;; running a build without `/subscribe` and answers 426. A page that went
   ;; silent whenever the socket did would be a worse answer than a slow one,
   ;; and the status line cannot say "disconnected" if nothing is asking.
-  (js/setInterval tick! 15000))
+  (js/setInterval tick! 15000)
+  (js/setInterval verify-balance! 10000)
+  (js/setTimeout verify-balance! 3000))

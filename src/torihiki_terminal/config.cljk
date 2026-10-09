@@ -12,20 +12,24 @@
 (def ^:const lots-per-unit 1000)
 (def ^:const market-id 1)
 (def ^:const max-leverage 40)
-(def ^:const node-url
-  "The BFT chain, not the single sequencer.
+(def node-urls
+  "The nodes a page reads when neither `?nodes=` nor `data-nodes` says
+  otherwise: ordinary torihiki nodes (`torihiki-node`'s standalone
+  implementation) on any host, compared rather than believed.
 
-  `torihiki-node` is one Durable Object deciding the order by itself and
-  saying so at `/head`. `torihiki-validator` is four of them running
-  `inga.replica` with the same engine as their state machine. The terminal
-  pointed at the first one for as long as the second one did not work; two
-  chains where there should be one is a question about which is real, and the
-  answer should not be whichever the page happens to fetch.
-
-  v3, because it is the set that still answers: `torihiki-validator` (v1)
-  returns Cloudflare error 1042 as of 2026-10-07, so a page pointed at it
-  showed `disconnected` and nothing else. v3 answers and is stalled at height
-  5805 — which the status line now says, rather than `live`."
-  "https://torihiki-validator-v3.04-feasts-minded.workers.dev")
+  Local by default, the layout `torihiki-node/deploy` and its scripts use. A
+  deployment renders its own list into `data-nodes` (`TK_NODES` at build
+  time); nothing here names a vendor or a hosted endpoint."
+  ["http://127.0.0.1:8801" "http://127.0.0.1:8802" "http://127.0.0.1:8803" "http://127.0.0.1:8804"])
 
 (def witnesses ["w1" "w2" "w3" "w4"])
+
+(def validator-set
+  "The set a page checks signed roots against, as `w1=<base64 spki>,...`, with
+  the engine epoch it belongs to. Empty: the page takes the set most of its
+  nodes report and says so. A deployment that knows its set renders it here
+  (`TK_SET`, `TK_EPOCH` at build time)."
+  "")
+
+(def validator-epoch 0)
+
