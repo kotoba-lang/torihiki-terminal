@@ -83,6 +83,19 @@
    [:span {:class "tk-sz"} (coins qty)]
    [:span {:class "tk-cum"} (coins cum)]])
 
+(defn spread-label
+  "What sits beside the last price: the spread when both sides quote, and
+  which side is missing when one does not. This used to read \"spread\"
+  under the last price whatever the book held, so a one-sided book looked
+  like a $99 spread."
+  [bids asks]
+  (let [bid (:level (first bids)) ask (:level (first asks))]
+    (cond (and bid ask (<= ask bid)) "last · crossed book"
+          (and bid ask) (str "last · spread $" (usd (- ask bid)))
+          bid "last · no asks"
+          ask "last · no bids"
+          :else "last · empty book")))
+
 (defn order-book
   "Panel body. The client re-renders this exact function and swaps the result
   into `#tk-book-panel`, so the server and the browser never disagree about
@@ -100,7 +113,7 @@
        (map #(book-row % :ask max-cum) (reverse asks))]
       [:div {:id "tk-spread" :class "tk-spread"}
        [:span {:class "hig-title3 tk-last"} (str "$" (usd (:last frame)))]
-       [:span {:class "hig-caption1 tk-dim"} "spread"]]
+       [:span {:class "hig-caption1 tk-dim"} (spread-label bids asks)]]
       [:div {:id "tk-bids" :class "tk-side tk-side--bid"}
        (map #(book-row % :bid max-cum) bids)]]
      {:class "tk-book"})))
@@ -378,8 +391,7 @@
         {:keys [nodes set epoch chain]} (or deploy {:nodes cfg/node-urls})]
     (ui/app-shell
      {:nav (ui/nav-bar "torihiki"
-                       {:trailing [(ui/chip "recorded session")
-                                   (ui/button "GitHub" {:act :gh})]})
+                       {:trailing [(ui/button "GitHub" {:act :gh})]})
       :sidebar [(session-panel)
                 (order-entry)
                 [:div {:id "tk-positions-panel"} (positions-panel f)]]
