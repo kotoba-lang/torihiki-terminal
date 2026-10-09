@@ -19,11 +19,20 @@ IFS=: read -ra entries <<< "$CP"
 jars=()
 for e in "${entries[@]}"; do
   if [ -d "$e" ]; then
-    (cd "$e" && find . -type f \( -name '*.cljk' -o -name '*.cljc' -o -name '*.cljs' -o -name '*.js' -o -name '*.edn' -o -name '*.css' \) -print0) |
+    (cd "$e" && find . -type f \( -name '*.cljk' -o -name '*.cljc' -o -name '*.cljs' -o -name '*.js' \) -print0) |
       while IFS= read -r -d '' f; do
         dst=".build/src/${f#./}"
         dst="${dst%.cljk}"; [ "$dst" != ".build/src/${f#./}" ] && dst="$dst.cljc"
         mkdir -p "$(dirname "$dst")"
+        # Two classpath entries providing one path: identical copies are
+        # fine, different ones are a build error — which one won used to
+        # depend on find order.
+        if [ -e "$dst" ]; then
+          if ! cmp -s "$e/$f" "$dst"; then
+            echo "build_js: conflicting $dst from $e" >&2; exit 1
+          fi
+          continue
+        fi
         cp "$e/$f" "$dst"
       done
   elif [[ "$e" == *.jar ]]; then
