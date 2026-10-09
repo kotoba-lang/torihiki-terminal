@@ -45,7 +45,9 @@
  :aliases
  {:build {:extra-paths ["script"] :main-opts ["-m" "build"]}
   :test {:extra-paths ["test"]
-         :extra-deps {io.github.cognitect-labs/test-runner
+         :extra-deps {io.github.kotoba-lang/test {:git/url "https://github.com/kotoba-lang/test.git"
+                                                 :git/sha "2ab4885f99fd25552d380d0f6b0b54c5a72eb7ae"}
+                      io.github.cognitect-labs/test-runner
                       {:git/url "https://github.com/cognitect-labs/test-runner.git"
                        :git/sha "dfb30dd6605cb6c0efc275e1df1736f6e90d4d73"}}
          :main-opts ["-m" "cognitect.test-runner"]}}}

@@ -1,0 +1,104 @@
+(ns torihiki-terminal.deploy
+  "What a deployment pins into the page at build time, read from the
+  environment and refused when it is wrong.
+
+    TK_NODES    http(s)://h1:8801,https://h2,...   the nodes the page reads
+    TK_SET      w1=<base64 spki>,w2=...            the validator set it trusts
+    TK_EPOCH    <n>                                the engine epoch of that set
+    TK_CHAIN    <chain id>                         the chain that set signs for
+
+  The set is the page's only trust root: a balance shows as PROVED only when
+  more than 2/3 of it signed the root. So a set that is wrong must stop the
+  build, not ship as a page that quietly proves nothing — or proves too much.
+  The chain id is pinned with it because a signature names its chain: a page
+  that took the chain id from the nodes would let them replay what the same
+  keys signed on another chain.
+
+  Pure: the caller passes the environment as a map, and (optionally)
+  `derive-pub`, `[chain-id witness] -> base64 spki`, the key a devnet derives
+  from the chain id alone. Keys anybody can compute are refused unless
+  TK_ALLOW_DEVNET=1, as `torihiki-node`'s light client does."
+  (:require [kotoba.lang.text :as str]))
+
+(def ^:private spki-prefix
+  "Base64 of the 12-byte Ed25519 SubjectPublicKeyInfo header. 12 bytes is a
+  whole number of base64 groups, so every Ed25519 SPKI key starts with it."
+  "MCowBQYDK2VwAyEA")
+
+(defn ed25519-spki?
+  "Is `k` the base64 of an Ed25519 public key in SPKI form (44 bytes, 60 characters)?"
+  [k]
+  (boolean (and (string? k)
+                (re-matches #"[A-Za-z0-9+/]{59}=" k)
+                (str/starts-with? k spki-prefix))))
+
+(defn- local-host? [url]
+  (boolean (re-find #"^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/|$)" url)))
+
+(defn- items [s]
+  (vec (remove str/blank? (map str/trim (str/split (or s "") #",")))))
+
+(defn- parse-nodes
+  "[nodes errors]."
+  [s allow-http]
+  (let [urls (mapv #(str/replace % #"/+$" "") (items s))
+        bad (remove #(re-matches #"https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:[0-9]{1,5})?(/[A-Za-z0-9._~%/-]*)?" %) urls)
+        plain (remove #(or (str/starts-with? % "https://") (local-host? %)) urls)]
+    [urls
+     (cond-> []
+       (empty? urls) (conj "TK_NODES names no node")
+       (seq bad) (conj (str "TK_NODES: not a base URL: " (str/join ", " bad)))
+       (and (empty? bad) (seq plain) (not allow-http))
+       (conj (str "TK_NODES: plain http to a non-local host (a page served over https cannot "
+                  "read it, and anybody on the path can rewrite it; TK_ALLOW_HTTP=1 to accept): "
+                  (str/join ", " plain)))
+       (not= (count urls) (count (distinct urls))) (conj "TK_NODES names a node twice"))]))
+
+(defn- parse-set
+  "[[[witness key] ...] errors]."
+  [s]
+  (let [pairs (mapv #(let [[w k] (str/split % #"=" 2)] [(str/trim (or w "")) (str/trim (or k ""))]) (items s))
+        bad-name (remove #(re-matches #"[A-Za-z0-9_.-]{1,64}" (first %)) pairs)
+        bad-key (remove #(ed25519-spki? (second %)) pairs)]
+    [pairs
+     (cond-> []
+       (empty? pairs) (conj "TK_SET names no validator")
+       (seq bad-name) (conj (str "TK_SET: bad witness name: " (str/join ", " (map first bad-name))))
+       (seq bad-key) (conj (str "TK_SET: not a base64 Ed25519 SPKI key for "
+                                (str/join ", " (map first bad-key))))
+       (not= (count pairs) (count (distinct (map first pairs)))) (conj "TK_SET names a witness twice")
+       (not= (count pairs) (count (distinct (map second pairs)))) (conj "TK_SET gives two witnesses one key"))]))
+
+(defn from-env
+  "`{:nodes [url ...] :set \"w=k,...\" :epoch n :chain id}` (the last three
+  only when TK_SET is given), or `default-nodes` with no set when the
+  environment says nothing. Throws `ex-info` listing EVERY problem found, so
+  one build run says everything that is wrong."
+  ([env default-nodes] (from-env env default-nodes nil))
+  ([env default-nodes derive-pub]
+   (let [given (fn [k] (let [v (get env k)] (when-not (str/blank? v) (str/trim v))))
+         [nodes node-errs] (if (given "TK_NODES")
+                             (parse-nodes (given "TK_NODES") (= "1" (given "TK_ALLOW_HTTP")))
+                             [(vec default-nodes) []])
+         set-s (given "TK_SET")
+         epoch-s (given "TK_EPOCH")
+         chain (given "TK_CHAIN")
+         [pairs set-errs] (when set-s (parse-set set-s))
+         derivable (when (and derive-pub chain (empty? set-errs))
+                     (vec (for [[w k] pairs :when (= k (derive-pub chain w))] w)))
+         errors (cond-> (into node-errs set-errs)
+                  (and set-s (not epoch-s)) (conj "TK_SET needs TK_EPOCH: a signature counts only for the epoch it names")
+                  (and set-s (not chain)) (conj "TK_SET needs TK_CHAIN: a signature counts only for the chain it names")
+                  (and epoch-s (not (re-matches #"[0-9]{1,15}" epoch-s))) (conj (str "TK_EPOCH is not an epoch number: " epoch-s))
+                  (and chain (not (re-matches #"[A-Za-z0-9_./:-]{1,128}" chain))) (conj (str "TK_CHAIN is not a chain id: " chain))
+                  (and (not set-s) (or epoch-s chain)) (conj "TK_EPOCH/TK_CHAIN without TK_SET pin nothing")
+                  (and (seq derivable) (not= "1" (given "TK_ALLOW_DEVNET")))
+                  (conj (str "TK_SET: keys of " (str/join ", " derivable) " are derived from the chain id, so "
+                             "anybody can sign with them and the page would prove nothing (TK_ALLOW_DEVNET=1 to accept)")))]
+     (when (seq errors)
+       (throw (ex-info (str "deploy config:\n  " (str/join "\n  " errors)) {:errors errors})))
+     (cond-> {:nodes nodes}
+       set-s (assoc :set (str/join "," (map (fn [[w k]] (str w "=" k)) pairs))
+                    :epoch (parse-long epoch-s)
+                    :chain chain
+                    :devnet (boolean (seq derivable)))))))

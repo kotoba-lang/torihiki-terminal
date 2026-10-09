@@ -1,0 +1,67 @@
+(ns torihiki-terminal.deploy-test
+  (:require [kotoba.test :refer [deftest is testing]]
+            [torihiki-terminal.deploy :as d]))
+
+(def k1 "MCowBQYDK2VwAyEAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=")
+(def k2 "MCowBQYDK2VwAyEAgLIyjmtLsgAjH/480JMZ2yaG/dGTSrvz6h/89+JWTWw=")
+(def k3 "MCowBQYDK2VwAyEAJEnxHaSXb799rvECbfZS3SzvHfC9SaQhGh+bFceN8/Q=")
+(def defaults ["http://127.0.0.1:8801"])
+(def good {"TK_NODES" "https://a.example/,https://b.example:8443/api"
+           "TK_SET" (str "w1=" k1 ",w2=" k2 ",w3=" k3)
+           "TK_EPOCH" "4" "TK_CHAIN" "torihiki-main-1"})
+
+(defn- errors [env & [derive]]
+  (try (d/from-env env defaults derive) nil
+       (catch #?(:clj Exception :cljs :default) e (:errors (ex-data e)))))
+
+(deftest nothing-set-is-the-local-default-with-no-set
+  (is (= {:nodes defaults} (d/from-env {} defaults)))
+  (is (= {:nodes defaults} (d/from-env {"TK_NODES" "  " "TK_SET" ""} defaults))))
+
+(deftest a-full-pin
+  (is (= {:nodes ["https://a.example" "https://b.example:8443/api"]
+          :set (str "w1=" k1 ",w2=" k2 ",w3=" k3) :epoch 4 :chain "torihiki-main-1" :devnet false}
+         (d/from-env good defaults (constantly "other")))))
+
+(deftest nodes-are-checked
+  (is (seq (errors (assoc good "TK_NODES" "a.example"))) "no scheme")
+  (is (seq (errors (assoc good "TK_NODES" "https://a.example?x=1"))) "a query is not a base")
+  (is (seq (errors (assoc good "TK_NODES" "https://u@a.example"))) "credentials")
+  (is (seq (errors (assoc good "TK_NODES" "https://a.example,https://a.example/"))) "twice")
+  (is (seq (errors (assoc good "TK_NODES" "http://a.example"))) "plain http to a remote host")
+  (is (nil? (errors (assoc good "TK_NODES" "http://a.example" "TK_ALLOW_HTTP" "1"))))
+  (is (nil? (errors (assoc good "TK_NODES" "http://127.0.0.1:8801,http://localhost:8802"))) "local is fine")
+  (is (seq (errors (assoc good "TK_NODES" "http://127.0.0.1.evil.example"))) "not local just by prefix"))
+
+(deftest the-set-is-checked
+  (testing "keys"
+    (is (seq (errors (assoc good "TK_SET" "w1=abc"))))
+    (is (seq (errors (assoc good "TK_SET" (str "w1=" (subs k1 0 56))))))
+    (is (seq (errors (assoc good "TK_SET" "w1=MCowBQYDK2VlAyEAO2onvM62pC1io6jQKm8Nc2UyFXcd4kOmOsBIoYtZ2ik=")))
+        "an X25519 key is not an Ed25519 one"))
+  (is (seq (errors (assoc good "TK_SET" (str "w1=" k1 ",w1=" k2)))) "a witness twice")
+  (is (seq (errors (assoc good "TK_SET" (str "w1=" k1 ",w2=" k1)))) "one key twice")
+  (is (seq (errors (assoc good "TK_SET" (str "w 1=" k1)))) "a bad name")
+  (is (seq (errors (assoc good "TK_SET" ",")))))
+
+(deftest a-set-needs-its-epoch-and-chain
+  (is (seq (errors (dissoc good "TK_EPOCH"))))
+  (is (seq (errors (dissoc good "TK_CHAIN"))))
+  (is (seq (errors (assoc good "TK_EPOCH" "-1"))))
+  (is (seq (errors (assoc good "TK_EPOCH" "4x"))))
+  (is (seq (errors (assoc good "TK_CHAIN" "a b"))))
+  (is (seq (errors (dissoc good "TK_SET"))) "an epoch and chain alone pin nothing"))
+
+(deftest devnet-keys-are-refused
+  (let [derive (fn [_ w] (when (= w "w2") k2))]
+    (is (some #(re-find #"w2" %) (errors good derive)))
+    (is (:devnet (d/from-env (assoc good "TK_ALLOW_DEVNET" "1") defaults derive)))))
+
+(deftest every-problem-at-once
+  (is (<= 3 (count (errors {"TK_NODES" "nope" "TK_SET" "w1=x"})))))
+
+(deftest nothing-in-a-url-can-leave-the-attribute
+  ;; The list is rendered into `data-nodes="..."`.
+  (is (seq (errors (assoc good "TK_NODES" "https://a.example/\"><script>"))))
+  (is (seq (errors (assoc good "TK_NODES" "https://a\"b.example"))))
+  (is (nil? (errors (assoc good "TK_NODES" "http://[::1]:8801,https://n-1.example/v1/torihiki")))))

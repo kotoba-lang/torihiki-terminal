@@ -370,8 +370,12 @@
 (defn ticker [frame]
   [:div {:id "tk-ticker" :class "tk-ticker"} (ticker-body frame)])
 
-(defn view [{:keys [frames meta]}]
-  (let [f (first frames)]
+(defn view
+  "`deploy` is what the build pinned (`torihiki-terminal.deploy/from-env`);
+  without it, the local defaults in `config`."
+  [{:keys [frames meta deploy]}]
+  (let [f (first frames)
+        {:keys [nodes set epoch chain]} (or deploy {:nodes cfg/node-urls})]
     (ui/app-shell
      {:nav (ui/nav-bar "torihiki"
                        {:trailing [(ui/chip "recorded session")
@@ -380,9 +384,8 @@
                 (order-entry)
                 [:div {:id "tk-positions-panel"} (positions-panel f)]]
       :id "tk-root"
-      :attrs (cond-> {:data-nodes (str/join "," cfg/node-urls)}
-               (seq cfg/validator-set) (assoc :data-set cfg/validator-set
-                                              :data-epoch (str cfg/validator-epoch)))}
+      :attrs (cond-> {:data-nodes (str/join "," nodes)}
+               (seq set) (assoc :data-set set :data-epoch (str epoch) :data-chain chain))}
      [:div {:class "tk-live"}
       [:span {:id "tk-status" :class "hig-caption2 tk-dim"} "connecting to the node…"]]
      (ticker f)
