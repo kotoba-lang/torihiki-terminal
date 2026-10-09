@@ -41,6 +41,7 @@
   applies to a refused transaction — the chain gives a reason, so the form
   shows the reason."
   (:require [kotoba-ui.core :as ui]
+            [torihiki.book :as bk]
             [torihiki.light :as light]
             [torihiki-terminal.config :as cfg]
             [torihiki-terminal.keys :as tkeys]
@@ -198,6 +199,46 @@
     (set! (.-textContent e) text)
     (set! (.-className e) (str "hig-footnote " (if ok? "tk-dim" "tk-down")))))
 
+(def ^:private follow-ms
+  "How long a submitted transaction is followed before the page says it has
+  not seen it in a block. The node resubmits what it accepted for longer
+  (`torihiki-node.mempool`), so this is when to tell the trader, not when the
+  transaction is given up."
+  30000)
+
+(defn- follow-tx
+  "A promise of what became of the transaction signed `sig`, asking the node
+  (`/tx-status`) until the answer is final or `follow-ms` passes:
+  `{:status \"applied\"|\"rejected\" :reason :height}`, or nil.
+
+  Only a FINAL answer counts. A rejection that consumed no nonce (a copy
+  that arrived before the transaction ahead of it, or somebody replaying the
+  signature inside another envelope) does not mean this one failed."
+  [sig]
+  (let [deadline (+ (js/Date.now) follow-ms)]
+    (letfn [(ask []
+              (-> (fetch-json (str "/tx-status?sig=" (js/encodeURIComponent sig)))
+                  (.catch (fn [_] nil))
+                  (.then (fn [o]
+                           (cond
+                             (and (:final o) (#{"applied" "rejected"} (:status o))) o
+                             ;; A node from before `/tx-status`: it cannot say,
+                             ;; and waiting would end in a claim it never made.
+                             (= "no-such-route" (:reason o)) ::unanswerable
+                             (> (js/Date.now) deadline) nil
+                             :else (js/Promise. (fn [ok _] (js/setTimeout #(ok (ask)) 500))))))))]
+      (ask))))
+
+(defn- report-outcome!
+  "Say what the chain did with the order, in the chain's words."
+  [o]
+  (cond
+    (= ::unanswerable o) (set-order-status! true "queued — a block will carry it (this node does not report outcomes)")
+    (nil? o) (set-order-status! false (str "not in a block after " (quot follow-ms 1000)
+                                           " s — the node still holds it; check before resubmitting"))
+    (= "applied" (:status o)) (set-order-status! true (str "in block " (:height o)))
+    :else (set-order-status! false (str "refused at block " (:height o) ": " (name (:reason o))))))
+
 ;; ── frames ──────────────────────────────────────────────────────────────────
 
 (defn- position-for
@@ -312,7 +353,9 @@
         (set-order-status! true "signing…")
         (-> (fetch-json (str "/account?id=" account))
             (.then (fn [a] (tkeys/sign-tx key chain-id account (:next-nonce a 1) tx)))
-            (.then (fn [envelope] (post-json "/tx" envelope)))
+            (.then (fn [envelope]
+                     (-> (post-json "/tx" envelope)
+                         (.then #(assoc % ::sig (:sig envelope))))))
             (.then (fn [r]
                      (if (:ok r)
                        ;; Queued, not landed. On a single sequencer /tx
@@ -323,12 +366,19 @@
                        ;; into its mempool and some later block will carry it.
                        ;; Saying "accepted at block" here would name a height
                        ;; that has not happened.
-                       (set-order-status! true "queued — a block will carry it")
+                       ;;
+                       ;; So it is followed until a block says what happened,
+                       ;; and the form stays busy meanwhile: the next order
+                       ;; would read the same next nonce and be refused.
+                       (do (set-order-status! true "queued — waiting for a block")
+                           (tick!)
+                           (-> (follow-tx (::sig r))
+                               (.then (fn [o] (report-outcome! o) (tick!) r))))
                        ;; the chain gave a reason; reporting "failed" instead
                        ;; would throw away the only useful part of the answer
-                       (set-order-status! false (str "refused: " (or (:reason r) "unknown"))))
-                     (tick!)
-                     r))
+                       (do (set-order-status! false (str "refused: " (or (:reason r) "unknown")))
+                           (tick!)
+                           r))))
             (.catch (fn [e]
                       (set-order-status! false "could not reach the node")
                       (js/console.error "torihiki-terminal:" e)
@@ -347,11 +397,15 @@
     (when (and v (seq v) (re-matches #"\d+" v))
       (js/parseInt v 10))))
 
-;; Mirrors torihiki.book's flag bits. Kept as three named constants rather
-;; than a magic literal so a wrong one is a wrong NAME at the call site.
-(def ^:const flag-post-only 1)
-(def ^:const flag-ioc 2)
-(def ^:const flag-reduce-only 4)
+;; torihiki.book's flag bits, taken from torihiki.book itself. They used to be
+;; copied here as 1/2/4 with post-only and IOC swapped — the engine's IOC is 1
+;; and post-only 2 — so the "Post only" chip sent an IOC order that took
+;; liquidity (found by crossing a post-only sell into a resting bid and
+;; watching it fill), and "IOC" sent a post-only one. A copy is a second
+;; place to be wrong; the engine's own constants are not.
+(def flag-post-only bk/flag-post-only)
+(def flag-ioc bk/flag-ioc)
+(def flag-reduce-only bk/flag-reduce-only)
 
 (defn- flags []
   (bit-or (if (flag-on? :flag-post) flag-post-only 0)
