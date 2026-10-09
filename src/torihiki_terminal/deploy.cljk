@@ -15,8 +15,8 @@
   keys signed on another chain.
 
   Pure: the caller passes the environment as a map, and (optionally)
-  `derive-pub`, `[chain-id witness] -> base64 spki`, the key a devnet derives
-  from the chain id alone. Keys anybody can compute are refused unless
+  `derive-pub`, `[chain-id witness] -> base64 spki` (or a collection of them),
+  the keys a devnet derives from the chain id alone. Keys anybody can compute are refused unless
   TK_ALLOW_DEVNET=1, as `torihiki-node`'s light client does."
   (:require [kotoba.lang.text :as str]))
 
@@ -143,8 +143,9 @@
   a default devnet chain, for the witness's own name or any devnet name."
   [pairs chain derive-pub]
   (let [known (set (for [c (distinct (cons chain devnet-chains))
-                         n (distinct (concat (map first pairs) devnet-names))]
-                     (derive-pub c n)))]
+                         n (distinct (concat (map first pairs) devnet-names))
+                         k (let [r (derive-pub c n)] (if (coll? r) r [r]))]
+                     k))]
     (vec (for [[w k] pairs :when (contains? known k)] w))))
 
 (defn from-env

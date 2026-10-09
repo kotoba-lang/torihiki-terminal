@@ -91,7 +91,9 @@
     (is (some #(re-find #"w3" %) (errors good derive)) "another chain")
     (is (some #(re-find #"x" %)
               (errors (assoc good "TK_SET" (str "w1=" k1 ",w2=" k2 ",x=" k3 ",w4=" k4)) derive))
-        "another name")))
+        "another name"))
+  (let [derive (fn [c w] (when (= w "w4") ["unrelated" k4]))]
+    (is (some #(re-find #"w4" %) (errors good derive)) "one of several derivations")))
 
 (deftest every-problem-at-once
   (is (<= 3 (count (errors {"TK_NODES" "nope" "TK_SET" "w1=x"})))))

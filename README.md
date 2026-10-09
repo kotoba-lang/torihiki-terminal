@@ -97,9 +97,10 @@ renders it into the page (`torihiki-terminal.deploy`):
 
 ```bash
 N=https://n1.example
+D="$(curl -s $N/duties)"   # keys and epoch from ONE answer, so they agree
 TK_NODES=$N,https://n2.example,https://n3.example,https://n4.example \
-TK_SET="$(curl -s $N/duties | jq -r '.["segment-keys"] | to_entries | map("\(.key)=\(.value)") | join(",")')" \
-TK_EPOCH="$(curl -s $N/attestation | jq -r .epoch)" \
+TK_SET="$(jq -r '.["segment-keys"] | to_entries | map("\(.key)=\(.value)") | join(",")' <<<"$D")" \
+TK_EPOCH="$(jq -r .epoch <<<"$D")" \
 TK_CHAIN="$(curl -s $N/attestation | jq -r .chain)" \
 kbb -M:build
 ```

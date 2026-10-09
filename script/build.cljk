@@ -82,15 +82,20 @@
                            "declaration, so this would ship as a silent style loss")
                       {:tokens dead})))))
 
-(defn- devnet-pub
-  "The key a devnet derives for witness `w` from the chain id alone
-  (`torihiki-node`: seed = sha256(chain-id \"/\" w))."
-  [chain-id w]
-  (let [seed (.digest (.update (nc/createHash "sha256") (str chain-id "/" w) "utf8"))
+(defn- pub-from-seed-of [s]
+  (let [seed (.digest (.update (nc/createHash "sha256") s "utf8"))
         der (js/Buffer.concat #js [(js/Buffer.from "302e020100300506032b657004220420" "hex") seed])]
     (.toString (.export (nc/createPublicKey (nc/createPrivateKey #js {:key der :format "der" :type "pkcs8"}))
                         #js {:format "der" :type "spki"})
                "base64")))
+
+(defn- devnet-pub
+  "The keys a devnet derives for witness `w` from the chain id alone: the
+  standalone node's seed sha256(chain \"/\" w), and the retired Worker's
+  sha256(chain \"|\" w \"|ed25519\") — the keys ADR-2608040600 is about."
+  [chain-id w]
+  [(pub-from-seed-of (str chain-id "/" w))
+   (pub-from-seed-of (str chain-id "|" w "|ed25519"))])
 
 (defn- pinned
   "TK_NODES / TK_SET / TK_EPOCH / TK_CHAIN, checked (`torihiki-terminal.deploy`)."
