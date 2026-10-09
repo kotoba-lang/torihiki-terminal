@@ -1,3 +1,13 @@
-{"name":"torihiki-terminal","private":true,"type":"module",
- "scripts":{"build":"amu compile --target wasm32-browser client && kbb -M:build"},
- "devDependencies":{"shadow-cljs":"2.28.20","wrangler":"^4.0.0"}}
+{
+ "name": "torihiki-terminal",
+ "private": true,
+ "type": "module",
+ "scripts": {
+  "build": "kbb -M:build && script/build_js.sh",
+  "build:js": "script/build_js.sh"
+ },
+ "devDependencies": {
+  "shadow-cljs": "2.28.20",
+  "wrangler": "^4.0.0"
+ }
+}
