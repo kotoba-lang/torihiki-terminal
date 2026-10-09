@@ -218,12 +218,15 @@
   kept, and shown if nothing better arrives."
   [sig]
   (let [deadline (+ (js/Date.now) follow-ms)
-        last-answer (atom nil)]
+        last-answer (atom nil)
+        ;; The node the transaction was posted to: "pending" is ITS memory,
+        ;; and the page may switch nodes while it waits.
+        node (base)]
     (letfn [(ask []
               ;; Each request is bounded: a node that accepts the connection
               ;; and never answers must not hold the form busy past the
               ;; deadline.
-              (-> (js/fetch (str (base) (with-w (str "/tx-status?sig=" (js/encodeURIComponent sig))))
+              (-> (js/fetch (str node (with-w (str "/tx-status?sig=" (js/encodeURIComponent sig))))
                             #js {:signal (js/AbortSignal.timeout 5000)})
                   (.then #(.json %))
                   (.then #(js->clj % :keywordize-keys true))
@@ -259,7 +262,7 @@
                              "pending" (str after " — the node still holds it"
                                             (when (:hint prev) (str "; last refusal: " (why (:hint prev))))
                                             ". Check before resubmitting.")
-                             "rejected" (str after " — refused for now: " (why (:reason prev)))
+                             "rejected" (str after " — refused for now" (when (:reason prev) (str ": " (why (:reason prev)))))
                              "unknown" (str after " — the node does not hold it; it may have been dropped")
                              (str after " — no answer from the node"))))
       (= "applied" (:status o)) (set-order-status! true (str "included in block " (:height o)))
