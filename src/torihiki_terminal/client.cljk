@@ -208,36 +208,62 @@
 
 (defn- follow-tx
   "A promise of what became of the transaction signed `sig`, asking the node
-  (`/tx-status`) until the answer is final or `follow-ms` passes:
-  `{:status \"applied\"|\"rejected\" :reason :height}`, or nil.
+  (`/tx-status`) until the answer is final or `follow-ms` passes: the final
+  `{:status \"applied\"|\"rejected\" :reason :height}`, or — at the
+  deadline — `{::timeout last-answer}`.
 
-  Only a FINAL answer counts. A rejection that consumed no nonce (a copy
+  Only a FINAL answer is a result. A rejection that consumed no nonce (a copy
   that arrived before the transaction ahead of it, or somebody replaying the
-  signature inside another envelope) does not mean this one failed."
+  signature inside another envelope) does not mean this one failed; it is
+  kept, and shown if nothing better arrives."
   [sig]
-  (let [deadline (+ (js/Date.now) follow-ms)]
+  (let [deadline (+ (js/Date.now) follow-ms)
+        last-answer (atom nil)]
     (letfn [(ask []
-              (-> (fetch-json (str "/tx-status?sig=" (js/encodeURIComponent sig)))
+              ;; Each request is bounded: a node that accepts the connection
+              ;; and never answers must not hold the form busy past the
+              ;; deadline.
+              (-> (js/fetch (str (base) (with-w (str "/tx-status?sig=" (js/encodeURIComponent sig))))
+                            #js {:signal (js/AbortSignal.timeout 5000)})
+                  (.then #(.json %))
+                  (.then #(js->clj % :keywordize-keys true))
                   (.catch (fn [_] nil))
                   (.then (fn [o]
+                           (when (map? o) (reset! last-answer o))
                            (cond
-                             (and (:final o) (#{"applied" "rejected"} (:status o))) o
+                             (and (true? (:final o)) (#{"applied" "rejected"} (:status o))) o
                              ;; A node from before `/tx-status`: it cannot say,
                              ;; and waiting would end in a claim it never made.
                              (= "no-such-route" (:reason o)) ::unanswerable
-                             (> (js/Date.now) deadline) nil
+                             (> (js/Date.now) deadline) {::timeout @last-answer}
                              :else (js/Promise. (fn [ok _] (js/setTimeout #(ok (ask)) 500))))))))]
       (ask))))
 
 (defn- report-outcome!
-  "Say what the chain did with the order, in the chain's words."
+  "Say what the chain did with the transaction, in the chain's words.
+
+  \"included\", not \"placed\" or \"filled\": the engine takes a
+  post-only order that would cross, an IOC order that fills nothing, or a
+  reduce-only order with nothing to reduce, and does nothing with it. The
+  book and the position panel say what the order did; this line says only
+  that a block carried it."
   [o]
-  (cond
-    (= ::unanswerable o) (set-order-status! true "queued — a block will carry it (this node does not report outcomes)")
-    (nil? o) (set-order-status! false (str "not in a block after " (quot follow-ms 1000)
-                                           " s — the node still holds it; check before resubmitting"))
-    (= "applied" (:status o)) (set-order-status! true (str "in block " (:height o)))
-    :else (set-order-status! false (str "refused at block " (:height o) ": " (name (:reason o))))))
+  (let [why (fn [r] (if (or (string? r) (keyword? r)) (name r) (str r)))]
+    (cond
+      (= ::unanswerable o) (set-order-status! true "queued — a block will carry it (this node does not report outcomes)")
+      (contains? o ::timeout)
+      (let [prev (::timeout o)
+            after (str "not in a block after " (quot follow-ms 1000) " s")]
+        (set-order-status! false
+                           (case (:status prev)
+                             "pending" (str after " — the node still holds it"
+                                            (when (:hint prev) (str "; last refusal: " (why (:hint prev))))
+                                            ". Check before resubmitting.")
+                             "rejected" (str after " — refused for now: " (why (:reason prev)))
+                             "unknown" (str after " — the node does not hold it; it may have been dropped")
+                             (str after " — no answer from the node"))))
+      (= "applied" (:status o)) (set-order-status! true (str "included in block " (:height o)))
+      :else (set-order-status! false (str "refused at block " (:height o) ": " (why (:reason o)))))))
 
 ;; ── frames ──────────────────────────────────────────────────────────────────
 

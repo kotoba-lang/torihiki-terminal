@@ -90,7 +90,8 @@
   like a $99 spread."
   [bids asks]
   (let [bid (:level (first bids)) ask (:level (first asks))]
-    (cond (and bid ask) (str "last · spread $" (usd (- ask bid)))
+    (cond (and bid ask (<= ask bid)) "last · crossed book"
+          (and bid ask) (str "last · spread $" (usd (- ask bid)))
           bid "last · no asks"
           ask "last · no bids"
           :else "last · empty book")))
