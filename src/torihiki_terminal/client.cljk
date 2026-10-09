@@ -70,7 +70,8 @@
 (defn- base
   "The node the page reads from: the one serving `witness`, or the first."
   []
-  (or (get @node-of @witness) (first nodes)))
+  (let [u (get @node-of @witness)]
+    (if (and u (not= u ::ambiguous)) u (first nodes))))
 
 (def ^:private stall-ms
   "How long the height may stand still before the status line stops saying
@@ -426,7 +427,16 @@
                                         (-> (js/fetch (str w "/head"))
                                             (.then #(.json %))
                                             (.then #(js->clj % :keywordize-keys true))
-                                            (.then (fn [h] (when (:witness h) (swap! node-of assoc (:witness h) w)) h))
+                                            (.then (fn [h]
+                                                   ;; A node names its own witness, and a node can lie.
+                                                   ;; First claim wins; a witness claimed by two URLs
+                                                   ;; is nobody's, and the page reads the first node.
+                                                   (when-let [wn (:witness h)]
+                                                     (swap! node-of (fn [m] (let [c (get m wn)]
+                                                                              (cond (nil? c) (assoc m wn w)
+                                                                                    (or (= c w) (= c ::ambiguous)) m
+                                                                                    :else (assoc m wn ::ambiguous))))))
+                                                   h))
                                             (.catch (fn [_] nil))))
                                       nodes)))
                        (.then (fn [hs]
@@ -581,7 +591,8 @@
 (defn- ed25519-verify
   "Does `sig` verify as `pubkey`'s over `payload`? WebCrypto, so a Promise."
   [pubkey payload sig]
-  (-> (js/crypto.subtle.importKey "spki" (b64->u8 pubkey) #js {:name "Ed25519"} false #js ["verify"])
+  (-> (let [k (b64->u8 pubkey)]
+        (js/crypto.subtle.importKey (if (= 32 (.-length k)) "raw" "spki") k #js {:name "Ed25519"} false #js ["verify"]))
       (.then (fn [k] (js/crypto.subtle.verify #js {:name "Ed25519"} k (b64->u8 sig)
                                               (.encode (js/TextEncoder.) payload))))
       (.catch (fn [_] false))))
@@ -608,55 +619,78 @@
                                    :members (into {} (for [[w k] (:segment-keys %)] [(name w) {:pubkey k :weight 1}]))})
                                duties))))))
 
+(defonce ^:private verifying (atom false))
+
+(defn- attested-at
+  "Ask every node for attestations at `h`, verify each signature here
+  (WebCrypto), and return what `torihiki.light/attested-root` makes of them.
+  A signature counts only for the exact (key, payload) it verified over — a
+  real signature copied onto another witness, height or root counts for
+  nothing."
+  [h members epoch chain]
+  (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation?h=" h)) nodes)))
+      (.then
+       (fn [as]
+         (let [as (vec (remove nil? (array-seq as)))
+               checks (vec (for [a as :let [m (get members (:witness a))]
+                                 :when (and m (string? (:sig a)) (string? (:root a)) (integer? (:height a)))]
+                             [(:pubkey m) (light/root-payload chain epoch (:height a) (:root a)) (:sig a)]))]
+           (-> (js/Promise.all (clj->js (map (fn [[k p sig]] (ed25519-verify k p sig)) checks)))
+               (.then (fn [oks]
+                        (let [good (set (keep (fn [[c ok]] (when ok c)) (map vector checks (array-seq oks))))]
+                          (light/attested-root as members chain epoch
+                                               (fn [k p sig] (contains? good [k p sig]))))))))))))
+
 (defn- verify-balance!
   "Prove this session's collateral against a root more than 2/3 of the set
-  signed (`torihiki.light`), and say so on the panel. No node is believed:
-  the signatures are checked here, and the balance is the account's own
-  merkle-sum leaf under that root."
+  signed (`torihiki.light`), and say so on the panel. Signatures are checked
+  here; the balance is the account's own merkle-sum leaf under that root,
+  from whichever node serves a proof that checks.
+
+  Only a PINNED set (`data-set`) makes it a proof. With the set taken from the
+  nodes, whoever runs the nodes chooses the keys — a link with `?nodes=` can
+  point a page anywhere — so the panel shows the figure as unproved."
   []
-  (when-let [acct (:account @session)]
-    (-> (js/Promise.all (clj->js (map #(get-json (str % "/duties")) nodes)))
-        (.then
-         (fn [duties]
-           (if-let [{:keys [members epoch held]} (trusted-set (array-seq duties))]
-             (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation")) nodes)))
-                 (.then
-                  (fn [latest]
-                    (let [h (apply max 0 (keep :height (array-seq latest)))]
-                      (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation?h=" h)) nodes)))
-                          (.then
-                           (fn [as]
-                             (let [as (vec (remove nil? (array-seq as)))]
-                               (-> (js/Promise.all
-                                    (clj->js (for [a as :let [m (get members (:witness a))]]
-                                               (if (and m (:sig a))
-                                                 (ed25519-verify (:pubkey m) (light/root-payload (:chain-id @session) epoch (:height a) (:root a)) (:sig a))
-                                                 (js/Promise.resolve false)))))
-                                   (.then
-                                    (fn [oks]
-                                      (let [good (set (keep (fn [[a ok]] (when ok [(:witness a) (:sig a)]))
-                                                            (map vector as (array-seq oks))))
-                                            found (light/attested-root as members (:chain-id @session) epoch
-                                                                       (fn [_ _ sig] (some #(= sig (second %)) good)))]
-                                        (cond
-                                          (:conflict found) (set-text! "tk-verified" "CONFLICTING ROOTS signed by the set — do not trust this chain")
-                                          (nil? found) (set-text! "tk-verified" "not verified — no root signed by more than 2/3 of the set")
-                                          :else
-                                          ;; From every node, the first that checks: the
-                                          ;; node this page reads may not have reached
-                                          ;; the newest attested height yet (it answers
-                                          ;; 404), and any of them may lie.
-                                          (-> (js/Promise.all (clj->js (map #(get-json (str % "/proof?a=" acct "&h=" (:height found))) nodes)))
-                                              (.then (fn [ps]
-                                                       (if-let [ok (some #(light/verify-account % found acct) (remove nil? (array-seq ps)))]
-                                                         (set-text! "tk-verified"
-                                                                    (str "$" (view/usd (quot (:collateral ok) 10))
-                                                                         " proved at height " (:height ok) ", root signed by "
-                                                                         (count (:signers ok)) "/" (count members)
-                                                                         (if held "" " (set as the nodes report it)")))
-                                                         (set-text! "tk-verified" "not verified — no proof checks against the signed root"))))))))))))))))))
-             (set-text! "tk-verified" "not verified — no validator set to check against"))))
-        (.catch (fn [_] (set-text! "tk-verified" "not verified — nodes unreachable"))))))
+  (let [acct (:account @session)
+        chain (:chain-id @session)]
+    (when (and acct chain (not @verifying))
+      (reset! verifying true)
+      (-> (js/Promise.all (clj->js (map #(get-json (str % "/duties")) nodes)))
+          (.then
+           (fn [duties]
+             (if-let [{:keys [members epoch held]} (trusted-set (array-seq duties))]
+               (-> (js/Promise.all (clj->js (map #(get-json (str % "/attestation")) nodes)))
+                   (.then
+                    (fn [latest]
+                      ;; Newest first, a few: one node reporting a height nobody
+                      ;; else has must not stop the check.
+                      (let [hs (take 4 (sort > (distinct (filter integer? (keep :height (array-seq latest))))))]
+                        (letfn [(try-h [hs]
+                                  (if (empty? hs)
+                                    (js/Promise.resolve nil)
+                                    (-> (attested-at (first hs) members epoch chain)
+                                        (.then (fn [r] (if r r (try-h (rest hs))))))))]
+                          (try-h hs)))))
+                   (.then
+                    (fn [found]
+                      (cond
+                        (:conflict found) (set-text! "tk-verified" "CONFLICTING ROOTS signed by the set — do not trust this chain")
+                        (nil? found) (set-text! "tk-verified" "not verified — no root signed by more than 2/3 of the set")
+                        :else
+                        (-> (js/Promise.all (clj->js (map #(get-json (str % "/proof?a=" acct "&h=" (:height found))) nodes)))
+                            (.then (fn [ps]
+                                     (if-let [ok (some #(light/verify-account % found acct) (remove nil? (array-seq ps)))]
+                                       (set-text! "tk-verified"
+                                                  (if held
+                                                    (str "$" (view/usd (quot (:collateral ok) 10))
+                                                         " proved at height " (:height ok) ", root signed by "
+                                                         (count (:signers ok)) "/" (count members))
+                                                    (str "$" (view/usd (quot (:collateral ok) 10))
+                                                         " — NOT a proof: the validator set was taken from these nodes, not pinned")))
+                                       (set-text! "tk-verified" "not verified — no proof checks against the signed root")))))))))
+               (set-text! "tk-verified" "not verified — no validator set to check against"))))
+          (.catch (fn [_] (set-text! "tk-verified" "not verified — nodes unreachable")))
+          (.finally (fn [] (reset! verifying false)))))))
 
 (defn ^:export start []
   (wire-form!)
