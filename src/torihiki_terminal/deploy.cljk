@@ -25,15 +25,83 @@
   whole number of base64 groups, so every Ed25519 SPKI key starts with it."
   "MCowBQYDK2VwAyEA")
 
+(def ^:private b64-alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/")
+
+(defn- b64->bytes
+  "Bytes of padded base64 `s`, as integers 0-255. Only called on strings the
+  caller already matched against the alphabet."
+  [s]
+  (let [digits (keep #(let [i (str/index-of b64-alphabet (str %))] i) (str/replace s #"=+$" ""))
+        bits (mapcat (fn [d] (map #(bit-and 1 (bit-shift-right d %)) [5 4 3 2 1 0])) digits)]
+    (mapv (fn [byte] (reduce (fn [a b] (+ (* 2 a) b)) 0 byte))
+          (filter #(= 8 (count %)) (partition-all 8 bits)))))
+
+(def ^:private small-order
+  "Ed25519 points of small order (libsodium's `ge25519_has_small_order` list,
+  last byte without the sign bit), including the non-canonical spellings of
+  0 and 1. A public key here signs for everybody: with A of small order,
+  R = A' and S = 0 verify on many messages, the identity on every one."
+  (let [hex (fn [h] (mapv #(#?(:clj Integer/parseInt :cljs js/parseInt) (apply str %) 16) (partition 2 h)))
+        ff (apply str (repeat 30 "ff"))]
+    #{(hex (apply str (repeat 32 "00")))
+      (hex (str "01" (apply str (repeat 31 "00"))))
+      (hex "26e8958fc2b227b045c3f489f2ef98f0d5dfac05d3c63339b13802886d53fc05")
+      (hex "c7176a703d4dd84fba3c0b760d10670f2a2053fa2c39ccc64ec7fd7792ac037a")
+      (hex (str "ec" ff "7f"))
+      (hex (str "ed" ff "7f"))
+      (hex (str "ee" ff "7f"))}))
+
+(defn hex->spki-b64
+  "The SPKI base64 of the 32-byte Ed25519 point in `hex` (for tests)."
+  [hex]
+  (let [bs (concat (take 12 (b64->bytes (str spki-prefix "AAAA")))
+                   (map #(#?(:clj Integer/parseInt :cljs js/parseInt) (apply str %) 16) (partition 2 hex)))
+        bits (mapcat (fn [b] (map #(bit-and 1 (bit-shift-right b %)) [7 6 5 4 3 2 1 0])) bs)
+        groups (partition 6 6 [0 0 0 0 0] bits)]
+    (str (apply str (map (fn [g] (nth b64-alphabet (reduce (fn [a b] (+ (* 2 a) b)) 0 g))) groups)) "=")))
+
 (defn ed25519-spki?
-  "Is `k` the base64 of an Ed25519 public key in SPKI form (44 bytes, 60 characters)?"
+  "Is `k` the canonical base64 of an Ed25519 public key in SPKI form (44
+  bytes, 60 characters), and not a point of small order?
+
+  Canonical: the last character before `=` carries 2 bits that decoding
+  throws away, so `...Zik=` and `...Zil=` are one key in two spellings — and
+  the page matches signatures on the string, so a second spelling would let
+  one validator count twice."
   [k]
   (boolean (and (string? k)
-                (re-matches #"[A-Za-z0-9+/]{59}=" k)
-                (str/starts-with? k spki-prefix))))
+                (re-matches #"[A-Za-z0-9+/]{58}[AEIMQUYcgkosw048]=" k)
+                (str/starts-with? k spki-prefix)
+                (let [point (subvec (b64->bytes k) 12)]
+                  (not (contains? small-order (update point 31 bit-and 0x7f)))))))
+
+(def devnet-chains
+  "Chain ids devnets run under by default (`torihiki-node`'s standalone and
+  worker). A devnet key is checked against these as well as the pinned
+  chain: devnet keys pinned under another chain id are still keys anybody
+  can compute."
+  ["torihiki-standalone-1" "torihiki-engi-devnet-1"])
+
+(def ^:private devnet-names (mapv #(str "w" %) (range 1 17)))
 
 (defn- local-host? [url]
   (boolean (re-find #"^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]+)?(/|$)" url)))
+
+(def ^:private url-re
+  #"([Hh][Tt][Tt][Pp][Ss]?)://((?:[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)*|\[[0-9A-Fa-f:]+\])(?::([0-9]{1,5}))?(/[A-Za-z0-9._~%/-]*)?")
+
+(defn- normalize-url
+  "`url` with its scheme and host lower-cased and a default port dropped, or
+  nil when it is not a plain base URL. Everything allowed is safe inside an
+  HTML attribute."
+  [url]
+  (when-let [[_ scheme host port path] (re-matches url-re url)]
+    (let [scheme (str/lower scheme)
+          port (when port (parse-long port))]
+      (when (or (nil? port) (<= 1 port 65535))
+        (str scheme "://" (str/lower host)
+             (when (and port (not= port (if (= scheme "https") 443 80))) (str ":" port))
+             path)))))
 
 (defn- items [s]
   (vec (remove str/blank? (map str/trim (str/split (or s "") #",")))))
@@ -41,8 +109,9 @@
 (defn- parse-nodes
   "[nodes errors]."
   [s allow-http]
-  (let [urls (mapv #(str/replace % #"/+$" "") (items s))
-        bad (remove #(re-matches #"https?://([A-Za-z0-9.-]+|\[[0-9A-Fa-f:]+\])(:[0-9]{1,5})?(/[A-Za-z0-9._~%/-]*)?" %) urls)
+  (let [given (mapv #(str/replace % #"/+$" "") (items s))
+        bad (remove normalize-url given)
+        urls (vec (keep normalize-url given))
         plain (remove #(or (str/starts-with? % "https://") (local-host? %)) urls)]
     [urls
      (cond-> []
@@ -69,6 +138,15 @@
        (not= (count pairs) (count (distinct (map first pairs)))) (conj "TK_SET names a witness twice")
        (not= (count pairs) (count (distinct (map second pairs)))) (conj "TK_SET gives two witnesses one key"))]))
 
+(defn- devnet-witnesses
+  "Witnesses in `pairs` whose key a devnet derives — under the pinned chain or
+  a default devnet chain, for the witness's own name or any devnet name."
+  [pairs chain derive-pub]
+  (let [known (set (for [c (distinct (cons chain devnet-chains))
+                         n (distinct (concat (map first pairs) devnet-names))]
+                     (derive-pub c n)))]
+    (vec (for [[w k] pairs :when (contains? known k)] w))))
+
 (defn from-env
   "`{:nodes [url ...] :set \"w=k,...\" :epoch n :chain id}` (the last three
   only when TK_SET is given), or `default-nodes` with no set when the
@@ -85,8 +163,11 @@
          chain (given "TK_CHAIN")
          [pairs set-errs] (when set-s (parse-set set-s))
          derivable (when (and derive-pub chain (empty? set-errs))
-                     (vec (for [[w k] pairs :when (= k (derive-pub chain w))] w)))
+                     (devnet-witnesses pairs chain derive-pub))
          errors (cond-> (into node-errs set-errs)
+                  (and set-s (empty? set-errs) (< (count pairs) 4) (not= "1" (given "TK_ALLOW_SMALL_SET")))
+                  (conj (str "TK_SET has " (count pairs) " validator(s): fewer than 4 tolerate no fault, so one "
+                             "key holder decides what the page proves (TK_ALLOW_SMALL_SET=1 to accept)"))
                   (and set-s (not epoch-s)) (conj "TK_SET needs TK_EPOCH: a signature counts only for the epoch it names")
                   (and set-s (not chain)) (conj "TK_SET needs TK_CHAIN: a signature counts only for the chain it names")
                   (and epoch-s (not (re-matches #"[0-9]{1,15}" epoch-s))) (conj (str "TK_EPOCH is not an epoch number: " epoch-s))
