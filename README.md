@@ -135,7 +135,7 @@ design-quality: **100.00**, no findings.
 
 ## Known couplings
 
-`config.cljc` duplicates the node's tick and lot scale so the terminal can
+`config.cljk` duplicates the node's tick and lot scale so the terminal can
 format integer ticks into dollars. The node already exposes both on `/market`;
 taking them from there is the right fix and is not done yet.
 
