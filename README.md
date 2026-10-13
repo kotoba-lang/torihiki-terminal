@@ -2,9 +2,12 @@
 
 The trading terminal for [`torihiki`](https://github.com/kotoba-lang/torihiki).
 
-**Live:** https://torihiki.pages.dev — reading
-[`torihiki-node`](https://github.com/kotoba-lang/torihiki-node) as it produces
-blocks.
+**Deployed:** https://torihiki.pages.dev serves an **old build**, not this
+branch. It predates the move to standalone nodes and still points at the
+retired Cloudflare Worker devnet, which no longer answers (see
+[What is real here](#what-is-real-here)). A build of the current tree reads
+whatever standalone [`torihiki-node`](https://github.com/kotoba-lang/torihiki-node)
+nodes it is given with `TK_NODES`.
 
 ## The page was a picture of itself
 
@@ -41,21 +44,43 @@ Two things changed so it cannot happen quietly again:
   TK_BASE=http://127.0.0.1:8899 kbb --backend sci script/verify.cljk
   ```
 
-  Against production: `live · block 35`, faucet accepted at 36, chip toggled,
-  buy accepted at 37, nonce 1 → 3.
+  Against production when it was written (2026-09, the Worker sequencer):
+  `live · block 35`, faucet accepted at 36, chip toggled, buy accepted at 37,
+  nonce 1 → 3. The default `TK_BASE` is still the deployed URL; it cannot
+  pass there now (see below).
 
 An assertion about the HTML still cannot tell you the page works. Only
 clicking it can, so both exist.
 
 ## What is real here
 
-The book, the fills, the funding rate and the state roots are read from a live
-sequencer running the real engine in a Cloudflare Worker. Nothing is recorded
-and nothing is mocked. Earlier versions of this page replayed a session
-generated at build time; it now polls the node.
+The book, the fills, the funding rate and the state roots are read from
+ordinary torihiki nodes — `torihiki-node`'s standalone process, running the
+real engine — over plain HTTP. Nothing is mocked. The page reads the nodes in
+`TK_NODES` (default: four local nodes, `127.0.0.1:8801`–`8804`) and compares
+them rather than believing one. Earlier versions replayed a session generated
+at build time, and later ones polled a single sequencer in a Cloudflare
+Worker; that Worker implementation is frozen and deprecated in
+`torihiki-node`, and its devnet has stalled.
 
-**It is a sequencer, not a chain.** One writer decides the order; nothing
-votes. The node says so in its own `/head` response and the page repeats it.
+There is **no public node set for this page today**. Build it against nodes
+you run (see [Build](#build)).
+
+**What https://torihiki.pages.dev serves (checked 2026-10-13).** A build from
+before the standalone change: its `data-node` is
+`torihiki-validator.04-feasts-minded.workers.dev`, which answers Cloudflare
+`error code: 1042` (HTTP 404), so the page has no data. It still shows that
+build's copy — a "recorded session" chip and a "running live in a Cloudflare
+Worker" panel — neither of which is true. The other retired Workers still
+answer but did not move while checked: the single sequencer (`torihiki-node`)
+at height 62, and `torihiki-validator-v3` at height 5805 with no certificate
+for its tip — where `torihiki-node` recorded it stalling on 2026-09-23. Redeploying `public/` from a `TK_*` build that names
+real nodes is what fixes the site; until then, do not read it as live.
+
+**It is not a decentralized chain yet.** The page reads a four-replica BFT
+validator set whose keys one party holds, so a quorum is one party's word;
+collateral is a faucet grant. The nodes say which of these they are in their
+own responses and the page repeats it.
 
 ## The browser renders with the same functions the server does
 
